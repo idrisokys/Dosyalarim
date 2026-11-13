@@ -33,11 +33,11 @@ import java.util.*
 
 class MainActivity : Activity() {
     private val dockBg = 0xFF1A1A1A.toInt(); private val bg = 0xFF121212.toInt(); private val bar = 0xFF212121.toInt(); private val card = 0xFF1E1E1E.toInt()
-    private lateinit var titleV: TextView; private lateinit var backB: TextView; private lateinit var body: FrameLayout; private lateinit var crumbS: HorizontalScrollView; private lateinit var crumbL: LinearLayout; private lateinit var dock: LinearLayout
+    private lateinit var titleV: TextView; private lateinit var body: FrameLayout; private lateinit var crumbS: HorizontalScrollView; private lateinit var crumbL: LinearLayout; private lateinit var dock: LinearLayout
     private var cur: File? = null; private var list: List<File>? = null; private var listTitle = ""
     private var picking = false; private var slotPick = -1; private val sel = linkedSetOf<File>()
     private var clip = listOf<File>(); private var cut = false
-    private var hidden = false; private var asked = false
+    private var hidden = true; private var asked = false
     private val root: File = Environment.getExternalStorageDirectory()
     private val prefs by lazy { getSharedPreferences("p", 0) }
     private var cats = mapOf<String, List<File>>()
@@ -60,28 +60,16 @@ class MainActivity : Activity() {
         window.statusBarColor = Color.BLACK; window.navigationBarColor = bg
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(bg) }
         val tb = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(bar) }
-        backB = tv("☰", 24f, Color.WHITE).apply { gravity = Gravity.CENTER; setOnClickListener { if (cur == null && list == null) menu(it) else onBackPressed() } }
         titleV = tv("", 20f, Color.WHITE).apply { typeface = Typeface.DEFAULT_BOLD; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
-        val mb = tv("⋮", 26f, Color.WHITE).apply { gravity = Gravity.CENTER; setOnClickListener { menu(it) } }
         crumbL = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         crumbS = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; visibility = View.GONE; addView(crumbL, -2, -1) }
         val center = FrameLayout(this).apply {
             addView(titleV, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER_VERTICAL))
             addView(crumbS, FrameLayout.LayoutParams(-1, -1))
         }
-        tb.addView(backB, dp(56), dp(56)); tb.addView(center, LinearLayout.LayoutParams(0, -1, 1f)); tb.addView(mb, dp(56), dp(56))
+        tb.setPadding(dp(16), 0, dp(12), 0); tb.addView(center, LinearLayout.LayoutParams(0, -1, 1f))
         body = FrameLayout(this)
         dock = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(dockBg) }
-        dock.setOnDragListener { v, e ->
-            when (e.action) {
-                DragEvent.ACTION_DRAG_STARTED -> if (e.clipDescription?.hasMimeType("text/plain") == true) { v.setBackgroundColor(0xFF263238.toInt()); true } else false
-                DragEvent.ACTION_DRAG_ENTERED -> { v.setBackgroundColor(0xFF3B5568.toInt()); true }
-                DragEvent.ACTION_DRAG_EXITED -> { v.setBackgroundColor(0xFF263238.toInt()); true }
-                DragEvent.ACTION_DROP -> { e.clipData?.getItemAt(0)?.text?.toString()?.let { pin(File(it)) }; true }
-                DragEvent.ACTION_DRAG_ENDED -> { v.setBackgroundColor(dockBg); true }
-                else -> true
-            }
-        }
         col.addView(tb, -1, dp(56)); col.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
         col.addView(View(this).apply { setBackgroundColor(0xFF333333.toInt()) }, -1, dp(1))
         col.addView(dock, -1, dp(58))
@@ -122,7 +110,6 @@ class MainActivity : Activity() {
         titleV.visibility = if (crumbs) View.GONE else View.VISIBLE
         crumbS.visibility = if (crumbs) View.VISIBLE else View.GONE
         if (crumbs) buildCrumbs()
-        backB.text = if (cur == null && list == null) "☰" else "←"
     }
 
     private fun buildCrumbs() {
@@ -145,20 +132,60 @@ class MainActivity : Activity() {
 
     private fun updateDock() {
         dock.removeAllViews()
-        fun item(ic: Drawable, label: String, click: () -> Unit, long: (() -> Unit)? = null) {
-            val v = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; setOnClickListener { click() } }
-            if (long != null) v.setOnLongClickListener { long(); true }
-            v.addView(ImageView(this).apply { setImageDrawable(ic) }, dp(30), dp(30))
-            v.addView(tv(label, 10f, 0xFFCCCCCC.toInt()).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER })
+        for (n in 0 until 4) {
+            val p = prefs.getString("slot$n", null)
+            val f = if (p == null) null else File(p)
+            val v = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
+            if (f == null) {
+                v.addView(ImageView(this).apply {
+                    setImageDrawable(Icons.add()); setColorFilter(0xFF888888.toInt()); setPadding(dp(5), dp(5), dp(5), dp(5))
+                    background = GradientDrawable().apply { setColor(Color.TRANSPARENT); cornerRadius = dp(8).toFloat(); setStroke(dp(1), 0xFF555555.toInt(), dp(4).toFloat(), dp(3).toFloat()) }
+                }, dp(30), dp(30))
+                v.addView(tv("Ekle", 10f, 0xFF888888.toInt()).apply { gravity = Gravity.CENTER })
+                v.setOnClickListener { slotPick = n; picking = true; browse(root) }
+            } else {
+                v.addView(ImageView(this).apply { setImageDrawable(Icons.folder()) }, dp(30), dp(30))
+                v.addView(tv(f.name, 10f, 0xFFCCCCCC.toInt()).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER; setPadding(dp(2), 0, dp(2), 0) })
+                v.setOnClickListener { if (f.isDirectory) { picking = false; list = null; browse(f) } else Toast.makeText(this, "Klasör bulunamadı", Toast.LENGTH_SHORT).show() }
+                v.setOnLongClickListener { slotMenu(n); true }
+                // dosyaları bu klasöre sürükleyip bırakınca taşı
+                v.setOnDragListener { view, e ->
+                    when (e.action) {
+                        DragEvent.ACTION_DRAG_STARTED -> e.clipDescription?.hasMimeType("text/plain") == true
+                        DragEvent.ACTION_DRAG_ENTERED -> { view.setBackgroundColor(0xFF3B5568.toInt()); true }
+                        DragEvent.ACTION_DRAG_EXITED, DragEvent.ACTION_DRAG_ENDED -> { view.setBackgroundColor(Color.TRANSPARENT); true }
+                        DragEvent.ACTION_DROP -> {
+                            val t = e.clipData?.getItemAt(0)?.text?.toString()
+                            if (t != null) moveInto(f, t.split("\n").filter { it.isNotEmpty() }.map { File(it) })
+                            true
+                        }
+                        else -> true
+                    }
+                }
+            }
             dock.addView(v, LinearLayout.LayoutParams(0, -1, 1f))
         }
-        item(Icons.homeColor(), "Ana ekran", { home() })
-        val pins = (0 until 4).mapNotNull { n -> prefs.getString("slot$n", null)?.let { n to File(it) } }
-        pins.forEach { (n, f) ->
-            item(Icons.folder(), f.name, { if (f.exists()) browse(f) else Toast.makeText(this, "Klasör bulunamadı", Toast.LENGTH_SHORT).show() }, { slotMenu(n) })
-        }
-        if (pins.isEmpty()) dock.addView(tv("Bir klasörü basılı tutup buraya sürükleyin", 12f, 0xFF888888.toInt()).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(0, -1, 4f))
-        else if (pins.size < 4) dock.addView(View(this), LinearLayout.LayoutParams(0, -1, (4 - pins.size).toFloat()))
+    }
+
+    private fun moveInto(dest: File, files: List<File>) {
+        if (!dest.isDirectory) { Toast.makeText(this, "Hedef klasör bulunamadı", Toast.LENGTH_SHORT).show(); return }
+        Thread {
+            var n = 0
+            files.forEach { f ->
+                if (!f.exists() || f.parentFile == dest) return@forEach
+                if (f.isDirectory && (dest.path + "/").startsWith(f.path + "/")) return@forEach
+                var t = File(dest, f.name); var i = 1
+                while (t.exists()) { t = File(dest, "${f.nameWithoutExtension}_$i" + (if (f.extension.isEmpty() || f.isDirectory) "" else "." + f.extension)); i++ }
+                try { if (!f.renameTo(t)) { f.copyRecursively(t); f.deleteRecursively() }; n++ } catch (e: Exception) {}
+            }
+            runOnUiThread {
+                Toast.makeText(this, if (n > 0) "$n öğe ${dest.name} klasörüne taşındı" else "Taşınacak öğe yok", Toast.LENGTH_SHORT).show()
+                sel.clear()
+                if (list != null) list = list!!.filter { it.exists() }
+                if (cur != null || list != null) refresh()
+            }
+            scan()
+        }.start()
     }
 
     private fun slotMenu(n: Int) {
@@ -283,11 +310,11 @@ class MainActivity : Activity() {
         }
         lv.setOnItemClickListener { _, _, p, _ -> val f = l[p]; if (sel.isNotEmpty()) toggle(f) else if (f.isDirectory) browse(f) else if (f.extension.lowercase() == "zip") zipDialog(f) else open(f) }
         lv.setOnItemLongClickListener { _, v, p, _ ->
-            val f = l[p]
-            if (f.isDirectory) {
-                try { v.startDragAndDrop(ClipData.newPlainText("klasor", f.absolutePath), View.DragShadowBuilder(v), null, 0) } catch (e: Exception) {}
-                if (f !in sel) { sel.add(f); refresh() }
-            } else toggle(f)
+            val f = l[p]; val was = f in sel
+            if (!was) sel.add(f)
+            val payload = sel.joinToString("\n") { it.absolutePath }
+            try { v.startDragAndDrop(ClipData.newPlainText("dosya", payload), View.DragShadowBuilder(v), null, 0) } catch (e: Exception) {}
+            if (!was) refresh()
             true
         }
         val wrap = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -428,16 +455,6 @@ class MainActivity : Activity() {
         startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND_MULTIPLE).setType("*/*").putParcelableArrayListExtra(Intent.EXTRA_STREAM, us).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Paylaş"))
     }
 
-    private fun pin(f: File) {
-        if (!f.isDirectory) return
-        val c = (0 until 4).map { prefs.getString("slot$it", null) }
-        if (f.path in c) { Toast.makeText(this, "Zaten alt çubukta", Toast.LENGTH_SHORT).show(); return }
-        val n = c.indexOfFirst { it == null }
-        if (n >= 0) { setSlot(n, f); Toast.makeText(this, "Alt çubuğa eklendi", Toast.LENGTH_SHORT).show() }
-        else AlertDialog.Builder(this).setTitle("Çubuk dolu, hangisi değişsin?")
-            .setItems(c.map { File(it!!).name }.toTypedArray()) { _, w -> setSlot(w, f) }.setNegativeButton("İptal", null).show()
-    }
-
     private fun input(t: String, init: String, ok: (String) -> Unit) {
         val e = EditText(this).apply { setText(init); setSingleLine() }
         AlertDialog.Builder(this).setTitle(t).setView(e).setPositiveButton("Tamam") { _, _ -> ok(e.text.toString().trim()) }.setNegativeButton("İptal", null).show()
@@ -454,27 +471,6 @@ class MainActivity : Activity() {
             }
             runOnUiThread { refresh() }; scan()
         }.start()
-    }
-
-    private fun menu(v: View) {
-        val p = PopupMenu(this, v); val its = ArrayList<Pair<String, () -> Unit>>()
-        fun a(n: String, r: () -> Unit) { its.add(n to r) }
-        val inBrowser = cur != null || list != null
-        if (sel.isNotEmpty()) {
-            if (sel.size == 1 && sel.first().isDirectory) a("Ana ekrana ekle") { pin(sel.first()); sel.clear(); refresh() }
-            a("Tümünü seç") { sel.addAll(items()); refresh() }
-        } else {
-            if (cur != null && list == null) {
-                if (clip.isNotEmpty()) a("Yapıştır (${clip.size})") { paste() }
-                a("Yeni klasör") { input("Klasör adı", "") { n -> if (n.isNotEmpty()) File(cur, n).mkdirs(); refresh() } }
-                a("Ara") { input("Ara", "") { q -> if (q.isNotEmpty()) Thread { val r = cur!!.walkTopDown().filter { it != cur && it.name.contains(q, true) }.take(500).toList(); runOnUiThread { openList("Ara: $q", r) } }.start() } }
-                if (!picking) a("Ana ekrana ekle") { pin(cur!!) }
-            }
-            a(if (hidden) "Gizli dosyaları gizle" else "Gizli dosyaları göster") { hidden = !hidden; if (inBrowser) refresh() }
-        }
-        its.forEachIndexed { i, x -> p.menu.add(0, i, i, x.first) }
-        p.setOnMenuItemClickListener { its[it.itemId].second(); true }
-        p.show()
     }
 
     @Deprecated("Deprecated in Java")

@@ -3,7 +3,7 @@
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
-    <application android:label="Dosya Yöneticisi" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" android:requestLegacyExternalStorage="true">
+    <application android:icon="@mipmap/ic_launcher" android:label="Dosya Yöneticisi" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" android:requestLegacyExternalStorage="true">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
