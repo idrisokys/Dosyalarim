@@ -293,7 +293,7 @@ class MainActivity : Activity() {
         }
         tile("", "Ana bellek", "", { browse(root) }, null, Icons.homeColor())
         tile("📥", "İndirilenler", "", { browse(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)) }, null, Icons.folder())
-        cat("img", "🖼", "Görüntüler", Icons.gallery(), true)
+        cat("img", "🖼", "Görüntüler", Icons.gallery())
         tile("", "Uygulamalar", "", { openApps() }, null, Icons.androidApp(), false, true)
         tile("", "Metin düzenleyici", "", { openEditor(null) }, null, Icons.textEditor())
         pinList().filter { it.exists() }.forEach { f ->
@@ -929,7 +929,19 @@ class MainActivity : Activity() {
     private fun isText(f: File) = f.extension.lowercase() in TXT && f.length() <= 1_000_000
 
     private fun openAny(f: File) {
-        if (f.extension.lowercase() == "zip") zipDialog(f) else if (isText(f)) openEditor(f) else open(f)
+        if (f.extension.lowercase() == "zip") zipDialog(f) else if (f.extension.lowercase() == "apk") installApk(f) else if (isText(f)) openEditor(f) else open(f)
+    }
+
+    /** APK'ya dokununca yükleme ekranını açar; "bilinmeyen kaynak" izni yoksa önce o ayar açılır. */
+    private fun installApk(f: File) {
+        if (Build.VERSION.SDK_INT >= 26 && !packageManager.canRequestPackageInstalls()) {
+            Toast.makeText(this, "Önce bu uygulamaya yükleme izni verin, sonra APK'ya tekrar dokunun", Toast.LENGTH_LONG).show()
+            startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+            return
+        }
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri(f), "application/vnd.android.package-archive").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+        } catch (e: ActivityNotFoundException) { Toast.makeText(this, "Yükleyici bulunamadı", Toast.LENGTH_SHORT).show() }
     }
 
     private fun openEditor(f: File?) {
