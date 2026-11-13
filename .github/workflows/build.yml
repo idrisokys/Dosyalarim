@@ -1,0 +1,40 @@
+name: Android APK Derle
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:   # Actions sekmesinden elle de çalıştırabilirsin
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Kodu indir
+        uses: actions/checkout@v4
+
+      - name: JDK 17 kur
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Android SDK kur
+        uses: android-actions/setup-android@v3
+
+      # Projede gradlew (wrapper) olmadığı için Gradle'ı burada kuruyoruz
+      - name: Gradle kur
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.5
+
+      - name: Debug APK derle
+        run: gradle assembleDebug --stacktrace
+
+      - name: APK'yı yükle
+        uses: actions/upload-artifact@v4
+        with:
+          name: DosyaYonetici-debug
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
