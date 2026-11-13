@@ -22,6 +22,22 @@ import android.provider.Settings
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
+import android.view.WindowManager
+import android.app.Dialog
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.media.ExifInterface
+import android.media.MediaMetadataRetriever
+import android.media.MediaPlayer
+import android.media.MediaScannerConnection
+import android.os.Handler
+import android.os.Looper
+import android.util.LruCache
+import androidx.viewpager.widget.PagerAdapter
+import androidx.viewpager.widget.ViewPager
+import java.util.concurrent.Executors
 import android.webkit.MimeTypeMap
 import android.widget.*
 import android.graphics.drawable.Drawable
@@ -40,6 +56,8 @@ class MainActivity : Activity() {
     private var clip = listOf<File>(); private var cut = false
     private var showHidden = true; private var asked = false
     private var appsMode = false
+    private var gal = false
+    private var viewer: Viewer? = null
     private class AppRow(val label: String, val pkg: String, val size: Long, val time: Long, val ai: ApplicationInfo)
     private var apps = listOf<AppRow>()
     private var appAdapter: BaseAdapter? = null
@@ -110,7 +128,7 @@ class MainActivity : Activity() {
             val skip = File(root, "Android")
             root.walkTopDown().onEnter { it != skip }.filter { it.isFile }.forEach { all.add(it) }
             val m = HashMap<String, List<File>>()
-            m["img"] = all.filter { it.extension.lowercase() in IMG }
+            m["img"] = all.filter { val e = it.extension.lowercase(); (e in IMG || e in VID) && !it.name.startsWith(".trashed") && !it.name.startsWith(".pending") }
             cats = m
             runOnUiThread { if (cur == null && list == null && !picking && !appsMode) home() }
         }.start()
@@ -235,7 +253,7 @@ class MainActivity : Activity() {
             g.addView(t, GridLayout.LayoutParams(GridLayout.spec(GridLayout.UNDEFINED), GridLayout.spec(GridLayout.UNDEFINED, 1f)).apply { width = 0 })
         }
         fun cat(k: String, ic: String, n: String, res: Drawable? = null) {
-            tile(ic, n, "", { openList(n, cats[k] ?: emptyList()) }, null, res)
+            tile(ic, n, "", { openList(n, cats[k] ?: emptyList(), true) }, null, res)
         }
         tile("", "Ana bellek", "", { browse(root) }, null, Icons.homeColor())
         tile("📥", "İndirilenler", "", { browse(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)) }, null, Icons.folder())
@@ -323,7 +341,7 @@ class MainActivity : Activity() {
     private fun setSlot(n: Int, f: File) { prefs.edit().putString("slot$n", f.path).apply(); slotsChanged() }
 
     private fun browse(d: File) { appsMode = false; cur = d; list = null; sel.clear(); refresh() }
-    private fun openList(t: String, l: List<File>) { appsMode = false; list = l; listTitle = t; sel.clear(); refresh() }
+    private fun openList(t: String, l: List<File>, g: Boolean = false) { appsMode = false; gal = g; list = l; listTitle = t; sel.clear(); refresh() }
 
     private fun items(): List<File> {
         val base = list ?: (cur?.listFiles()?.toList() ?: emptyList())
@@ -338,6 +356,7 @@ class MainActivity : Activity() {
     private fun refresh() {
         val l = items()
         chrome(if (sel.isNotEmpty()) "${sel.size} seçili" else if (list != null) listTitle else if (cur == root) "Ana bellek" else cur?.name ?: "", cur != null && list == null && sel.isEmpty())
+        if (list != null && gal) { body.removeAllViews(); body.addView(galleryView(l)); return }
         val lv = ListView(this).apply { divider = ColorDrawable(0xFF2E2E2E.toInt()); dividerHeight = dp(1); setBackgroundColor(bg) }
         lv.adapter = object : BaseAdapter() {
             override fun getCount() = l.size
@@ -371,6 +390,322 @@ class MainActivity : Activity() {
         else if (clip.isNotEmpty() && cur != null && list == null && sel.isEmpty()) wrap.addView(pasteBar(), -1, dp(52))
         body.removeAllViews(); body.addView(wrap)
     }
+
+
+    // ======================= GALERİ (resim + video) =======================
+    private val ui = Handler(Looper.getMainLooper())
+    private val pool = Executors.newFixedThreadPool(3)
+    private val fullPool = Executors.newFixedThreadPool(2)
+    private val thumbs = object : LruCache<String, Bitmap>(maxOf(4096, (Runtime.getRuntime().maxMemory() / 1024 / 8).toInt())) {
+        override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount / 1024
+    }
+
+    private fun isVid(f: File) = f.extension.lowercase() in VID
+
+    /** fit=true: en büyük kenar maxDim'i geçmesin (tam ekran). fit=false: en küçük kenar >= maxDim (küçük resim). */
+    private fun decodeImg(f: File, maxDim: Int, fit: Boolean): Bitmap? {
+        return try {
+            val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(f.path, o)
+            if (o.outWidth <= 0 || o.outHeight <= 0) return null
+            var s = 1
+            if (fit) { while (maxOf(o.outWidth, o.outHeight) / s > maxDim) s *= 2 }
+            else { while (minOf(o.outWidth, o.outHeight) / (s * 2) >= maxDim) s *= 2 }
+            val b = BitmapFactory.decodeFile(f.path, BitmapFactory.Options().apply { inSampleSize = s }) ?: return null
+            val deg = try {
+                when (ExifInterface(f.path).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
+                    ExifInterface.ORIENTATION_ROTATE_90 -> 90
+                    ExifInterface.ORIENTATION_ROTATE_180 -> 180
+                    ExifInterface.ORIENTATION_ROTATE_270 -> 270
+                    else -> 0
+                }
+            } catch (e: Exception) { 0 }
+            if (deg == 0) b else Bitmap.createBitmap(b, 0, 0, b.width, b.height, Matrix().apply { postRotate(deg.toFloat()) }, true)
+        } catch (e: Throwable) { null }
+    }
+
+    private fun videoFrame(f: File, target: Int): Bitmap? {
+        val r = MediaMetadataRetriever()
+        return try {
+            r.setDataSource(f.path)
+            val bm = r.getFrameAtTime(1_000_000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC) ?: r.getFrameAtTime(0) ?: return null
+            val sc = target.toFloat() / minOf(bm.width, bm.height)
+            if (sc < 1f) Bitmap.createScaledBitmap(bm, maxOf(1, (bm.width * sc).toInt()), maxOf(1, (bm.height * sc).toInt()), true) else bm
+        } catch (e: Throwable) { null } finally { try { r.release() } catch (e: Exception) {} }
+    }
+
+    private fun loadThumb(f: File): Bitmap? {
+        thumbs.get(f.path)?.let { return it }
+        val b = if (isVid(f)) videoFrame(f, 360) else decodeImg(f, 360, false)
+        if (b != null) thumbs.put(f.path, b)
+        return b
+    }
+
+    /** Dosyayı diskten, ana listeden ve MediaStore'dan siler. Onay sormaz. */
+    private fun removeMedia(f: File): Boolean {
+        val ok = try { f.delete() } catch (e: Exception) { false }
+        if (ok) {
+            cats = cats.mapValues { e -> e.value.filter { it.path != f.path } }
+            list = list?.filter { it.path != f.path }
+            thumbs.remove(f.path)
+            try { MediaScannerConnection.scanFile(this, arrayOf(f.path), null, null) } catch (e: Exception) {}
+            Toast.makeText(this, "Silindi: ${f.name}", Toast.LENGTH_SHORT).show()
+        } else Toast.makeText(this, "Silinemedi: ${f.name}", Toast.LENGTH_SHORT).show()
+        return ok
+    }
+
+    private fun shareOne(f: File) {
+        val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(f.extension.lowercase()) ?: if (isVid(f)) "video/*" else "image/*"
+        try {
+            val u = uri(f)
+            val i = Intent(Intent.ACTION_SEND).setType(mime).putExtra(Intent.EXTRA_STREAM, u).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            i.clipData = ClipData.newRawUri("", u)
+            startActivity(Intent.createChooser(i, "Paylaş"))
+        } catch (e: Exception) { Toast.makeText(this, "Paylaşılamadı", Toast.LENGTH_SHORT).show() }
+    }
+
+    private fun iconBtn(ic: Drawable, desc: String, rot: Float, click: () -> Unit): ImageView =
+        ImageView(this).apply {
+            setImageDrawable(ic); setColorFilter(Color.WHITE); rotation = rot; contentDescription = desc
+            setPadding(dp(10), dp(10), dp(10), dp(10)); setOnClickListener { click() }
+        }
+
+    /** Kare hücre: küçük resim + videolarda oynat rozeti. */
+    private inner class Cell : FrameLayout(this@MainActivity) {
+        val img = ImageView(this@MainActivity).apply { scaleType = ImageView.ScaleType.CENTER_CROP; setBackgroundColor(0xFF2A2A2A.toInt()) }
+        val badge = ImageView(this@MainActivity).apply {
+            setImageDrawable(Icons.play()); setPadding(dp(4), dp(4), dp(4), dp(4))
+            background = GradientDrawable().apply { setShape(GradientDrawable.OVAL); setColor(0x99000000.toInt()) }
+        }
+        init {
+            addView(img, FrameLayout.LayoutParams(-1, -1))
+            addView(badge, FrameLayout.LayoutParams(dp(26), dp(26), Gravity.BOTTOM or Gravity.START).apply { setMargins(dp(5), 0, 0, dp(5)) })
+        }
+        override fun onMeasure(w: Int, h: Int) { super.onMeasure(w, w) }
+    }
+
+    private fun galleryView(l: List<File>): View {
+        val data = l.toMutableList()
+        if (data.isEmpty()) return tv("Görüntü veya video bulunamadı", 16f, 0xFF999999.toInt()).apply { gravity = Gravity.CENTER }
+        val ad = object : BaseAdapter() {
+            override fun getCount() = data.size
+            override fun getItem(p: Int) = data[p]
+            override fun getItemId(p: Int) = p.toLong()
+            override fun getView(p: Int, v: View?, parent: ViewGroup?): View {
+                val c = (v as? Cell) ?: Cell()
+                val f = data[p]
+                c.badge.visibility = if (isVid(f)) View.VISIBLE else View.GONE
+                c.img.tag = f.path
+                val hit = thumbs.get(f.path)
+                if (hit != null) c.img.setImageBitmap(hit)
+                else {
+                    c.img.setImageDrawable(null)
+                    pool.execute {
+                        if (c.img.tag == f.path) {
+                            val b = loadThumb(f)
+                            if (b != null) runOnUiThread { if (c.img.tag == f.path) c.img.setImageBitmap(b) }
+                        }
+                    }
+                }
+                return c
+            }
+        }
+        val gap = dp(2)
+        val gv = GridView(this).apply {
+            numColumns = 3; horizontalSpacing = gap; verticalSpacing = gap
+            stretchMode = GridView.STRETCH_COLUMN_WIDTH; setBackgroundColor(bg)
+            selector = ColorDrawable(Color.TRANSPARENT); adapter = ad
+        }
+        gv.setOnItemClickListener { _, _, p, _ -> if (p in data.indices) Viewer(data, p) { ad.notifyDataSetChanged() } }
+        gv.setOnItemLongClickListener { _, _, p, _ ->
+            if (p in data.indices && removeMedia(data[p])) { data.removeAt(p); ad.notifyDataSetChanged() }
+            true
+        }
+        return gv
+    }
+
+    /** Tam ekran sayfa: resim ya da video. Video sayfa seçilince otomatik başlar. */
+    private inner class Pg(val f: File, val onLong: () -> Unit) {
+        val vid = isVid(f)
+        val root = FrameLayout(this@MainActivity).apply { setBackgroundColor(Color.BLACK) }
+        val img = ImageView(this@MainActivity).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
+        val play = ImageView(this@MainActivity).apply {
+            setImageDrawable(Icons.play()); setPadding(dp(20), dp(20), dp(20), dp(20)); visibility = View.GONE
+            background = GradientDrawable().apply { setShape(GradientDrawable.OVAL); setColor(0x99000000.toInt()) }
+        }
+        val seek = SeekBar(this@MainActivity).apply { max = 100 }
+        var vv: VideoView? = null
+        var dead = false
+        var active = false
+        var seeking = false
+        val tick: Runnable = object : Runnable {
+            override fun run() {
+                val v = vv
+                if (v == null || dead || !active) return
+                val d = v.duration
+                if (d > 0 && !seeking) { seek.max = d; seek.progress = v.currentPosition }
+                ui.postDelayed(this, 250)
+            }
+        }
+
+        fun activate() {
+            if (!vid || dead) return
+            active = true
+            val v = vv ?: VideoView(this@MainActivity).also { vv = it; root.addView(it, 0, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER)) }
+            img.visibility = View.VISIBLE; play.visibility = View.GONE; seek.progress = 0
+            v.setOnPreparedListener { mp ->
+                mp.isLooping = false
+                if (active) { v.start(); ui.postDelayed({ if (active && !dead) img.visibility = View.GONE }, 500) }
+            }
+            v.setOnInfoListener { _, what, _ -> if (what == MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START) img.visibility = View.GONE; false }
+            v.setOnCompletionListener { play.visibility = View.VISIBLE }
+            v.setOnErrorListener { _, _, _ ->
+                Toast.makeText(this@MainActivity, "Video oynatılamadı", Toast.LENGTH_SHORT).show()
+                img.visibility = View.VISIBLE; true
+            }
+            v.setVideoURI(Uri.fromFile(f))
+            ui.removeCallbacks(tick); ui.post(tick)
+        }
+
+        fun deactivate() {
+            active = false; ui.removeCallbacks(tick)
+            vv?.let { try { it.stopPlayback() } catch (e: Exception) {}; root.removeView(it) }
+            vv = null
+            if (vid) { img.visibility = View.VISIBLE; play.visibility = View.GONE; seek.progress = 0 }
+        }
+
+        fun dispose() { dead = true; deactivate() }
+
+        fun pause() {
+            val v = vv ?: return
+            if (active && v.isPlaying) { v.pause(); play.visibility = View.VISIBLE }
+        }
+
+        fun toggle() {
+            if (!vid || !active) return
+            val v = vv ?: return
+            if (v.isPlaying) { v.pause(); play.visibility = View.VISIBLE }
+            else { v.start(); play.visibility = View.GONE; ui.removeCallbacks(tick); ui.post(tick) }
+        }
+
+        init {
+            root.addView(img, FrameLayout.LayoutParams(-1, -1))
+            if (vid) {
+                root.addView(play, FrameLayout.LayoutParams(dp(76), dp(76), Gravity.CENTER))
+                root.addView(seek, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply { setMargins(dp(12), 0, dp(12), dp(16)) })
+                seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) { if (fromUser) vv?.seekTo(p) }
+                    override fun onStartTrackingTouch(sb: SeekBar?) { seeking = true }
+                    override fun onStopTrackingTouch(sb: SeekBar?) { seeking = false }
+                })
+            }
+            root.isClickable = true
+            root.setOnClickListener { toggle() }
+            root.setOnLongClickListener { onLong(); true }
+            fullPool.execute {
+                val b = if (vid) loadThumb(f) else decodeImg(f, 2400, true)
+                runOnUiThread {
+                    if (!dead) {
+                        if (b != null) img.setImageBitmap(b)
+                        else if (!vid) { img.setPadding(dp(110), dp(110), dp(110), dp(110)); img.setImageDrawable(Icons.file()) }
+                    }
+                }
+            }
+        }
+    }
+
+    /** Tam ekran gezgin: parmakla kaydırma + üst barda geri/ileri + paylaş. */
+    private inner class Viewer(val data: MutableList<File>, start: Int, val changed: () -> Unit) {
+        val dlg = Dialog(this@MainActivity, android.R.style.Theme_Black_NoTitleBar)
+        val holders = HashMap<Int, Pg>()
+        var cur = start
+        val pager = ViewPager(this@MainActivity)
+        val nameV = tv("", 16f, Color.WHITE).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END; typeface = Typeface.DEFAULT_BOLD }
+        val countV = tv("", 12f, 0xFFAAAAAA.toInt())
+        val prevB = iconBtn(Icons.chevron(), "Önceki", 180f) { go(-1) }
+        val nextB = iconBtn(Icons.chevron(), "Sonraki", 0f) { go(1) }
+
+        val adapter = object : PagerAdapter() {
+            override fun getCount() = data.size
+            override fun isViewFromObject(v: View, o: Any) = v === o
+            override fun getItemPosition(o: Any) = PagerAdapter.POSITION_NONE
+            override fun instantiateItem(c: ViewGroup, p: Int): Any {
+                val f = data[p]
+                val pg = Pg(f) { delFile(f) }
+                holders[p] = pg
+                c.addView(pg.root, -1, -1)
+                if (p == cur) pg.activate()
+                return pg.root
+            }
+            override fun destroyItem(c: ViewGroup, p: Int, o: Any) {
+                val v = o as View
+                val e = holders.entries.firstOrNull { it.value.root === v }
+                if (e != null) { e.value.dispose(); holders.remove(e.key) }
+                c.removeView(v)
+            }
+        }
+
+        fun refreshBar() {
+            if (data.isEmpty()) return
+            nameV.text = data[cur].name
+            countV.text = "${cur + 1} / ${data.size}"
+            prevB.alpha = if (cur > 0) 1f else 0.3f
+            nextB.alpha = if (cur < data.size - 1) 1f else 0.3f
+        }
+
+        fun go(d: Int) { val n = cur + d; if (n in data.indices) pager.setCurrentItem(n, true) }
+
+        fun delFile(f: File) {
+            val i = data.indexOf(f)
+            if (i < 0 || !removeMedia(f)) return
+            data.removeAt(i)
+            if (data.isEmpty()) { dlg.dismiss(); return }
+            cur = minOf(i, data.size - 1)
+            adapter.notifyDataSetChanged()
+            pager.setCurrentItem(cur, false)
+            refreshBar()
+        }
+
+        fun pauseVideo() { holders[cur]?.pause() }
+
+        init {
+            val top = LinearLayout(this@MainActivity).apply { gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(bar); setPadding(dp(4), 0, dp(4), 0) }
+            top.addView(iconBtn(Icons.back(), "Geri", 0f) { dlg.dismiss() }, LinearLayout.LayoutParams(dp(44), dp(44)))
+            val col = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(6), 0, dp(6), 0) }
+            col.addView(nameV); col.addView(countV)
+            top.addView(col, LinearLayout.LayoutParams(0, -2, 1f))
+            top.addView(prevB, LinearLayout.LayoutParams(dp(44), dp(44)))
+            top.addView(nextB, LinearLayout.LayoutParams(dp(44), dp(44)))
+            top.addView(iconBtn(Icons.share(), "Paylaş", 0f) { if (data.isNotEmpty()) shareOne(data[cur]) }, LinearLayout.LayoutParams(dp(44), dp(44)))
+            val rootV = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.BLACK) }
+            rootV.addView(top, LinearLayout.LayoutParams(-1, dp(54)))
+            rootV.addView(pager, LinearLayout.LayoutParams(-1, 0, 1f))
+            pager.adapter = adapter
+            pager.setCurrentItem(cur, false)
+            pager.addOnPageChangeListener(object : ViewPager.SimpleOnPageChangeListener() {
+                override fun onPageSelected(p: Int) {
+                    if (p != cur) { holders[cur]?.deactivate(); cur = p; holders[p]?.activate() }
+                    refreshBar()
+                }
+            })
+            dlg.setContentView(rootV)
+            dlg.window?.apply {
+                setLayout(-1, -1); setBackgroundDrawable(ColorDrawable(Color.BLACK))
+                addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+            dlg.setOnDismissListener {
+                holders.values.toList().forEach { it.dispose() }; holders.clear()
+                if (this@MainActivity.viewer === this@Viewer) this@MainActivity.viewer = null
+                changed()
+            }
+            this@MainActivity.viewer = this@Viewer
+            refreshBar()
+            dlg.show()
+        }
+    }
+
+    override fun onPause() { super.onPause(); viewer?.pauseVideo() }
+    override fun onDestroy() { viewer?.dlg?.dismiss(); super.onDestroy() }
 
     private fun barBtn(ic: Drawable, label: String, enabled: Boolean, act: () -> Unit): View {
         val b = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; alpha = if (enabled) 1f else 0.35f }
