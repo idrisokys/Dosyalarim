@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- klasör arkası + sekme -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M28,36 L46,36 L52,43 L80,43 L80,74 L28,74 Z" />
+    <!-- klasör ön yüzü -->
+    <path
+        android:fillColor="#FFE0B2"
+        android:pathData="M28,52 L80,52 L80,74 L28,74 Z" />
+</vector>
