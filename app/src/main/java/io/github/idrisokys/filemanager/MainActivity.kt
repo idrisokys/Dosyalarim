@@ -33,7 +33,7 @@ import java.util.*
 
 class MainActivity : Activity() {
     private val dockBg = 0xFF1A1A1A.toInt(); private val bg = 0xFF121212.toInt(); private val bar = 0xFF212121.toInt(); private val card = 0xFF1E1E1E.toInt()
-    private lateinit var titleV: TextView; private lateinit var cancelV: TextView; private lateinit var body: FrameLayout; private lateinit var crumbS: HorizontalScrollView; private lateinit var crumbL: LinearLayout; private lateinit var dock: LinearLayout
+    private lateinit var titleV: TextView; private lateinit var pinV: ImageView; private lateinit var titleRow: LinearLayout; private lateinit var cancelV: TextView; private lateinit var body: FrameLayout; private lateinit var crumbS: HorizontalScrollView; private lateinit var crumbL: LinearLayout; private lateinit var dock: LinearLayout
     private var cur: File? = null; private var list: List<File>? = null; private var listTitle = ""
     private var picking = false; private var slotPick = -1; private val sel = linkedSetOf<File>()
     private var clip = listOf<File>(); private var cut = false
@@ -60,18 +60,26 @@ class MainActivity : Activity() {
         window.statusBarColor = Color.BLACK; window.navigationBarColor = bg
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(bg) }
         val tb = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(bar) }
-        titleV = tv("", 20f, Color.WHITE).apply { typeface = Typeface.DEFAULT_BOLD; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+        titleV = tv("", 15f, Color.WHITE).apply { typeface = Typeface.DEFAULT_BOLD; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
         crumbL = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         crumbS = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; visibility = View.GONE; addView(crumbL, -2, -1) }
-        cancelV = tv("İptal", 20f, Color.WHITE).apply { typeface = Typeface.DEFAULT_BOLD; maxLines = 1; gravity = Gravity.CENTER_VERTICAL; visibility = View.GONE; setPadding(dp(12), 0, 0, 0); setOnClickListener { sel.clear(); refresh() } }
+        cancelV = tv("İptal", 15f, Color.WHITE).apply { typeface = Typeface.DEFAULT_BOLD; maxLines = 1; gravity = Gravity.CENTER_VERTICAL; visibility = View.GONE; setPadding(dp(12), 0, 0, 0); setOnClickListener { sel.clear(); refresh() } }
+        pinV = ImageView(this).apply {
+            setImageDrawable(Icons.pin()); setColorFilter(Color.WHITE); setPadding(dp(7), dp(7), dp(7), dp(7)); visibility = View.GONE
+            contentDescription = "Ana ekrana sabitle"; setOnClickListener { pinSelected() }
+        }
+        titleRow = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            addView(titleV, LinearLayout.LayoutParams(-2, -2)); addView(pinV, LinearLayout.LayoutParams(dp(34), dp(34)))
+        }
         val center = FrameLayout(this).apply {
-            addView(titleV, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER_VERTICAL))
+            addView(titleRow, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER_VERTICAL))
             addView(crumbS, FrameLayout.LayoutParams(-1, -1))
         }
-        tb.setPadding(dp(16), 0, dp(16), 0); tb.addView(center, LinearLayout.LayoutParams(0, -1, 1f)); tb.addView(cancelV, LinearLayout.LayoutParams(-2, -1))
+        tb.setPadding(dp(12), 0, dp(12), 0); tb.addView(center, LinearLayout.LayoutParams(0, -1, 1f)); tb.addView(cancelV, LinearLayout.LayoutParams(-2, -1))
         body = FrameLayout(this)
         dock = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(dockBg) }
-        col.addView(tb, -1, dp(56)); col.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
+        col.addView(tb, -1, dp(40)); col.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
         col.addView(View(this).apply { setBackgroundColor(0xFF333333.toInt()) }, -1, dp(1))
         col.addView(dock, -1, dp(58))
         setContentView(col); migratePins(); updateDock(); home()
@@ -98,7 +106,6 @@ class MainActivity : Activity() {
             val m = HashMap<String, List<File>>()
             m["img"] = all.filter { it.extension.lowercase() in IMG }
             m["apk"] = all.filter { it.extension.lowercase() == "apk" }
-            m["new"] = all.sortedByDescending { it.lastModified() }.take(200)
             cats = m
             runOnUiThread { if (cur == null && list == null && !picking) home() }
         }.start()
@@ -106,7 +113,8 @@ class MainActivity : Activity() {
 
     private fun chrome(t: String, crumbs: Boolean = false) {
         titleV.text = t
-        titleV.visibility = if (crumbs) View.GONE else View.VISIBLE
+        titleRow.visibility = if (crumbs) View.GONE else View.VISIBLE
+        pinV.visibility = if (sel.isNotEmpty()) View.VISIBLE else View.GONE
         crumbS.visibility = if (crumbs) View.VISIBLE else View.GONE
         if (crumbs) buildCrumbs()
         cancelV.visibility = if (sel.isNotEmpty()) View.VISIBLE else View.GONE
@@ -116,14 +124,14 @@ class MainActivity : Activity() {
         crumbL.removeAllViews()
         fun chev() = ImageView(this).apply { setImageDrawable(Icons.chevron()); setColorFilter(0xFF888888.toInt()) }
         val last = cur ?: return
-        crumbL.addView(ImageView(this).apply { setImageDrawable(Icons.homeColor()); setOnClickListener { home() } }, dp(34), dp(34))
-        crumbL.addView(chev(), dp(22), dp(22))
-        crumbL.addView(ImageView(this).apply { setImageDrawable(Icons.folder()); setOnClickListener { browse(root) } }, dp(34), dp(34))
+        crumbL.addView(ImageView(this).apply { setImageDrawable(Icons.homeColor()); setOnClickListener { home() } }, dp(26), dp(26))
+        crumbL.addView(chev(), dp(18), dp(18))
+        crumbL.addView(ImageView(this).apply { setImageDrawable(Icons.folder()); setOnClickListener { browse(root) } }, dp(26), dp(26))
         val chain = ArrayList<File>(); var f: File? = last
         while (f != null && f.path != root.path) { chain.add(0, f); f = f.parentFile }
         chain.forEach { d ->
-            crumbL.addView(chev(), dp(22), dp(22))
-            crumbL.addView(tv(d.name, 17f, if (d == last) Color.WHITE else 0xFFBBBBBB.toInt()).apply {
+            crumbL.addView(chev(), dp(18), dp(18))
+            crumbL.addView(tv(d.name, 14f, if (d == last) Color.WHITE else 0xFFBBBBBB.toInt()).apply {
                 maxLines = 1; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(6), 0, dp(6), 0); setOnClickListener { if (d != last) browse(d) }
             }, LinearLayout.LayoutParams(-2, -1))
         }
@@ -201,37 +209,56 @@ class MainActivity : Activity() {
     private fun home() {
         cur = null; list = null; sel.clear(); picking = false; body.removeAllViews()
         chrome("Dosya Yöneticisi")
-        val g = GridLayout(this).apply { columnCount = 3; setPadding(dp(8), dp(24), dp(8), dp(24)) }
+        val g = GridLayout(this).apply { columnCount = 4; setPadding(dp(4), dp(12), dp(4), dp(12)) }
         fun tile(ic: String, name: String, sub: String, click: () -> Unit, long: (() -> Unit)? = null, res: Drawable? = null, dashed: Boolean = false) {
-            val t = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setPadding(dp(4), dp(10), dp(4), dp(14)) }
+            val t = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setPadding(dp(2), dp(6), dp(2), dp(8)) }
             val i: View = when {
                 res != null -> ImageView(this).apply { setImageDrawable(res); setPadding(dp(2), dp(2), dp(2), dp(2)) }
                 dashed -> ImageView(this).apply {
                     setImageDrawable(Icons.add()); setColorFilter(0xFF888888.toInt()); setPadding(dp(22), dp(22), dp(22), dp(22))
                     background = GradientDrawable().apply { setColor(Color.TRANSPARENT); cornerRadius = dp(22).toFloat(); setStroke(dp(2), 0xFF555555.toInt(), dp(6).toFloat(), dp(4).toFloat()) }
                 }
-                else -> tv(ic, 30f, Color.WHITE).apply {
+                else -> tv(ic, 22f, Color.WHITE).apply {
                     gravity = Gravity.CENTER
-                    background = GradientDrawable().apply { setColor(card); cornerRadius = dp(22).toFloat(); setStroke(dp(1), 0xFF3A3A3A.toInt()) }
+                    background = GradientDrawable().apply { setColor(card); cornerRadius = dp(14).toFloat(); setStroke(dp(1), 0xFF3A3A3A.toInt()) }
                 }
             }
-            t.addView(i, dp(72), dp(72))
-            t.addView(tv(name, 16f, if (dashed) 0xFF888888.toInt() else 0xFFEEEEEE.toInt()).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER; setPadding(0, dp(6), 0, 0) })
-            if (sub.isNotEmpty()) t.addView(tv(sub, 12f, 0xFF999999.toInt()).apply { gravity = Gravity.CENTER })
+            t.addView(i, dp(52), dp(52))
+            t.addView(tv(name, 12f, if (dashed) 0xFF888888.toInt() else 0xFFEEEEEE.toInt()).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER; setPadding(0, dp(4), 0, 0) })
+            if (sub.isNotEmpty()) t.addView(tv(sub, 10f, 0xFF999999.toInt()).apply { gravity = Gravity.CENTER })
             t.setOnClickListener { click() }
             if (long != null) t.setOnLongClickListener { long(); true }
             g.addView(t, GridLayout.LayoutParams(GridLayout.spec(GridLayout.UNDEFINED), GridLayout.spec(GridLayout.UNDEFINED, 1f)).apply { width = 0 })
         }
-        fun cat(k: String, ic: String, n: String) {
+        fun cat(k: String, ic: String, n: String, res: Drawable? = null) {
             val l = cats[k]; val sub = if (l == null) "" else "${sz(l.sumOf { it.length() })} (${l.size})"
-            tile(ic, n, sub, { openList(n, l ?: emptyList()) })
+            tile(ic, n, sub, { openList(n, l ?: emptyList()) }, null, res)
         }
         val st = StatFs(root.path); val tot = st.totalBytes; val used = tot - st.availableBytes
         tile("", "Ana bellek", "${sz(used)} / ${sz(tot)}", { browse(root) }, null, Icons.homeColor())
         tile("📥", "İndirilenler", "", { browse(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)) }, null, Icons.folder())
         cat("img", "🖼", "Görüntüler")
-        cat("apk", "🤖", "Uygulamalar"); cat("new", "🕒", "Yeni Dosyalar")
+        cat("apk", "🤖", "Uygulamalar", Icons.androidApp())
+        pinList().filter { it.exists() }.forEach { f ->
+            tile("", f.name, "", {
+                if (f.isDirectory) browse(f) else if (f.extension.lowercase() == "zip") zipDialog(f) else open(f)
+            }, {
+                savePins(pinList().filter { it.path != f.path })
+                Toast.makeText(this, "Sabitleme kaldırıldı: ${f.name}", Toast.LENGTH_SHORT).show(); home()
+            }, if (f.isDirectory) Icons.folder() else Icons.file())
+        }
         body.addView(ScrollView(this).apply { addView(g) })
+    }
+
+    private fun pinList(): List<File> = (prefs.getString("hpins", "") ?: "").split("\n").filter { it.isNotEmpty() }.map { File(it) }
+    private fun savePins(l: List<File>) { prefs.edit().putString("hpins", l.joinToString("\n") { it.path }).apply() }
+    private fun pinSelected() {
+        if (sel.isEmpty()) return
+        val l = pinList().toMutableList(); var n = 0
+        sel.forEach { f -> if (l.none { it.path == f.path }) { l.add(f); n++ } }
+        savePins(l); sel.clear()
+        Toast.makeText(this, if (n > 0) "$n öğe ana ekrana sabitlendi" else "Zaten sabitlenmiş", Toast.LENGTH_SHORT).show()
+        refresh()
     }
 
     private fun migratePins() {
@@ -252,23 +279,8 @@ class MainActivity : Activity() {
         return l.sortedByDescending { it.lastModified() }
     }
 
-    private fun icon(f: File): String {
-        if (f.isDirectory) return "📁"
-        val e = f.extension.lowercase()
-        return when { e in IMG -> "🖼"; e in VID -> "🎬"; e in AUD -> "🎵"; e in DOC -> "📄"; e == "apk" -> "🤖"; e in setOf("zip", "rar", "7z", "tar", "gz") -> "🗜"; else -> "📃" }
-    }
-
-    private fun iconView(f: File): View {
-        val e = f.extension.lowercase()
-        val d: Drawable? = when {
-            f.isDirectory -> Icons.folder()
-            e in setOf("md", "txt", "pdf", "doc", "docx", "odt", "rtf") -> Icons.docBlue()
-            e in IMG || e in VID || e in AUD || e == "apk" || e in setOf("zip", "rar", "7z", "tar", "gz") || e in DOC -> null
-            else -> Icons.file()
-        }
-        return if (d != null) ImageView(this).apply { setImageDrawable(d); setPadding(dp(1), dp(1), dp(1), dp(1)) }
-        else tv(icon(f), 24f, Color.WHITE).apply { gravity = Gravity.CENTER }
-    }
+    private fun iconView(f: File): View =
+        ImageView(this).apply { setImageDrawable(if (f.isDirectory) Icons.folder() else Icons.file()); setPadding(dp(1), dp(1), dp(1), dp(1)) }
 
     private fun refresh() {
         val l = items()
