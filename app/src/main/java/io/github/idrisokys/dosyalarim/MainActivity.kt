@@ -91,19 +91,19 @@ class MainActivity : Activity() {
         titleV = tv("", 21f, Color.WHITE).apply { typeface = Typeface.DEFAULT_BOLD; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
         crumbL = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         crumbS = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; visibility = View.GONE; addView(crumbL, -2, -1) }
-        cancelV = tv("İptal", 18f, Color.WHITE).apply { typeface = Typeface.DEFAULT_BOLD; maxLines = 1; gravity = Gravity.CENTER_VERTICAL; visibility = View.GONE; setPadding(dp(12), 0, 0, 0); setOnClickListener { sel.clear(); editMode = false; refresh() } }
+        cancelV = tv("İptal", 18f, Color.WHITE).apply { typeface = Typeface.DEFAULT_BOLD; maxLines = 1; gravity = Gravity.CENTER_VERTICAL; visibility = View.GONE; setPadding(dp(12), 0, 0, 0); setOnClickListener { sel.clear(); editMode = false; refresh(true) } }
         selAllV = ImageView(this).apply {
             setImageDrawable(Icons.selectAll()); setColorFilter(Color.WHITE); setPadding(dp(8), dp(8), dp(8), dp(8)); visibility = View.GONE
             contentDescription = "Tümünü seç"
             setOnClickListener {
                 val all = items()
                 if (all.isNotEmpty() && sel.containsAll(all)) sel.clear() else sel.addAll(all)
-                refresh()
+                refresh(true)
             }
         }
         penV = ImageView(this).apply {
             setImageDrawable(Icons.rename()); setColorFilter(Color.WHITE); setPadding(dp(8), dp(8), dp(8), dp(8)); visibility = View.GONE
-            contentDescription = "Seç"; setOnClickListener { editMode = true; refresh() }
+            contentDescription = "Seç"; setOnClickListener { editMode = true; refresh(true) }
         }
         pinV = ImageView(this).apply {
             setImageDrawable(Icons.pin()); setColorFilter(Color.WHITE); setPadding(dp(8), dp(8), dp(8), dp(8)); visibility = View.GONE
@@ -384,11 +384,22 @@ class MainActivity : Activity() {
     private fun iconView(f: File): View =
         ImageView(this).apply { setImageDrawable(if (f.isDirectory) Icons.folder() else Icons.file()); setPadding(dp(1), dp(1), dp(1), dp(1)) }
 
-    private fun refresh() {
+    private var curLv: ListView? = null
+
+    /** keepScroll=true: aynı listede kalındığında (seçim, tümünü seç, sil...) kaydırma konumunu korur. */
+    private fun refresh(keepScroll: Boolean = false) {
+        val oldLv = curLv
+        var sPos = 0; var sTop = 0
+        if (keepScroll && oldLv != null && oldLv.isAttachedToWindow) {
+            sPos = oldLv.firstVisiblePosition
+            sTop = oldLv.getChildAt(0)?.top ?: 0
+        }
+        curLv = null
         val l = items()
         chrome(if (editMode) "${sel.size} seçili" else if (list != null) listTitle else if (cur == root) "Ana bellek" else cur?.name ?: "", cur != null && list == null && !editMode)
         if (list != null && gal) { body.removeAllViews(); body.addView(galleryView(l)); return }
         val lv = ListView(this).apply { divider = ColorDrawable(0xFF2E2E2E.toInt()); dividerHeight = dp(1); setBackgroundColor(bg) }
+        curLv = lv
         lv.adapter = object : BaseAdapter() {
             override fun getCount() = l.size
             override fun getItem(p: Int) = l[p]
@@ -398,10 +409,24 @@ class MainActivity : Activity() {
                 val row = LinearLayout(this@MainActivity).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(12), dp(5), dp(12), dp(5)); if (f in sel) setBackgroundColor(0xFF2C3E50.toInt()) }
                 if (editMode) {
                     val on = f in sel
-                    row.addView(TextView(this@MainActivity).apply {
+                    val box = TextView(this@MainActivity).apply {
                         text = if (on) "✓" else ""; textSize = 15f; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD; gravity = Gravity.CENTER
                         background = GradientDrawable().apply { cornerRadius = dp(5).toFloat(); setColor(if (on) 0xFF4A90D9.toInt() else Color.TRANSPARENT); setStroke(dp(2), if (on) 0xFF4A90D9.toInt() else 0xFF888888.toInt()) }
-                    }, LinearLayout.LayoutParams(dp(24), dp(24)).apply { setMargins(0, 0, dp(12), 0) })
+                    }
+                    // Seçme ve sürükleme SADECE kutucuktan yapılır (biraz geniş dokunma alanı)
+                    val hit = android.widget.FrameLayout(this@MainActivity).apply {
+                        addView(box, android.widget.FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER_VERTICAL or Gravity.START))
+                        setOnClickListener { toggle(f) }
+                        setOnLongClickListener {
+                            // sadece seçili bir kutucuğa basılı tutunca seçilenleri alttaki sabit klasörlere sürükle
+                            if (f in sel && pendingShare == null) {
+                                val payload = sel.joinToString("\n") { it.absolutePath }
+                                try { row.startDragAndDrop(ClipData.newPlainText("dosya", payload), View.DragShadowBuilder(row), null, 0) } catch (e: Exception) {}
+                            }
+                            true
+                        }
+                    }
+                    row.addView(hit, LinearLayout.LayoutParams(dp(46), dp(48)))
                 }
                 row.addView(iconView(f), dp(48), dp(48))
                 val c = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
@@ -412,19 +437,15 @@ class MainActivity : Activity() {
                 return row
             }
         }
-        lv.setOnItemClickListener { _, _, p, _ -> val f = l[p]; if (editMode) toggle(f) else if (f.isDirectory) browse(f) else if (f.extension.lowercase() == "zip") zipDialog(f) else open(f) }
+        lv.setOnItemClickListener { _, _, p, _ -> val f = l[p]; if (editMode) Unit else if (f.isDirectory) browse(f) else if (f.extension.lowercase() == "zip") zipDialog(f) else open(f) }
         lv.setOnItemLongClickListener { _, v, p, _ ->
             if (pendingShare != null) return@setOnItemLongClickListener true
             val f = l[p]
             if (editMode) {
-                // seçili öğelerden birine basılı tutunca seçilenleri alttaki klasörlere sürükle
-                if (f in sel) {
-                    val payload = sel.joinToString("\n") { it.absolutePath }
-                    try { v.startDragAndDrop(ClipData.newPlainText("dosya", payload), View.DragShadowBuilder(v), null, 0) } catch (e: Exception) {}
-                }
+                // seçim modunda satırın kendisi etkisiz; seç/sürükle sadece kutucuktan
             } else if (f.isFile && (f.extension.lowercase() in IMG || f.extension.lowercase() in VID)) {
                 // resim/video: basılı tutunca onay ve bildirim olmadan sil
-                if (removeMedia(f)) refresh()
+                if (removeMedia(f)) refresh(true)
             }
             true
         }
@@ -435,6 +456,7 @@ class MainActivity : Activity() {
         else if (picking) wrap.addView(Button(this).apply { text = "Bu klasörü seç"; setOnClickListener { if (slotPick in 0..3) setSlot(slotPick, cur!!); slotPick = -1; home() } }, -1, -2)
         else if (clip.isNotEmpty() && cur != null && list == null && !editMode) wrap.addView(pasteBar(), -1, dp(52))
         body.removeAllViews(); body.addView(wrap)
+        if (keepScroll && (sPos > 0 || sTop != 0)) lv.post { lv.setSelectionFromTop(minOf(sPos, maxOf(0, l.size - 1)), sTop) }
     }
 
 
@@ -865,7 +887,7 @@ class MainActivity : Activity() {
             .setNegativeButton("İptal", null).show()
     }
 
-    private fun toggle(f: File) { if (!sel.remove(f)) sel.add(f); refresh() }
+    private fun toggle(f: File) { if (!sel.remove(f)) sel.add(f); refresh(true) }
 
     private fun uri(f: File) = KFileProvider.uriFor(this, f)
 
