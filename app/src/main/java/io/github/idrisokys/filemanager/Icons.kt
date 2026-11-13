@@ -73,11 +73,12 @@ object Icons {
 
     fun chevron() = m("M10,6L8.59,7.41 13.17,12l-4.58,4.59L10,18l6,-6z")
 
-    fun homeColor() = PathIcon(24f, listOf(
-        "M5,11 L12,5 L19,11 L19,21 L5,21 Z" to 0xFFF5F5F5.toInt(),
-        "M12,2 L1,11.5 L2.6,13.2 L12,5.2 L21.4,13.2 L23,11.5 Z" to 0xFFE53935.toInt(),
-        "M5,11 L12,5 L19,11 L19,21 L14,21 L14,14 L10,14 L10,21 L5,21 Z" to 0xFFEF5350.toInt(),
-        "M10,14 L14,14 L14,21 L10,21 Z" to 0xFF29B6F6.toInt()
+    /** Ev ikonu: açık gri gövde, kırmızı çatı ve kapı, küçük mavi pencere. */
+    fun homeColor() = PathIcon(100f, listOf(
+        "M17,50 L50,20 L83,50 L83,92 L17,92 Z" to 0xFFF0F0F0.toInt(),
+        "M50,8 L97,52 L91,58 L50,22 L9,58 L3,52 Z" to 0xFFFE4847.toInt(),
+        "M41,66 L59,66 L59,92 L41,92 Z" to 0xFFF03C3C.toInt(),
+        "M42,40 L58,40 L58,45 L42,45 Z" to 0xFF6CB4E4.toInt()
     ))
 
     /** Düz dosya: arkada katlanmış köşeli sayfa, önde beyaz kare. */
