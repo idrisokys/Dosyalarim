@@ -53,6 +53,8 @@ class MainActivity : Activity() {
     private val dockBg = 0xFF1A1A1A.toInt(); private val bg = 0xFF121212.toInt(); private val bar = 0xFF212121.toInt(); private val card = 0xFF1E1E1E.toInt()
     private lateinit var titleV: TextView; private lateinit var pinV: ImageView; private lateinit var titleRow: LinearLayout; private lateinit var cancelV: TextView; private lateinit var body: FrameLayout; private lateinit var crumbS: HorizontalScrollView; private lateinit var crumbL: LinearLayout; private lateinit var dock: LinearLayout
     private var cur: File? = null; private var list: List<File>? = null; private var listTitle = ""
+    private var editMode = false
+    private lateinit var selAllV: ImageView; private lateinit var penV: ImageView
     private var picking = false; private var slotPick = -1; private val sel = linkedSetOf<File>()
     private var clip = listOf<File>(); private var cut = false
     private var showHidden = true; private var asked = false
@@ -89,7 +91,20 @@ class MainActivity : Activity() {
         titleV = tv("", 21f, Color.WHITE).apply { typeface = Typeface.DEFAULT_BOLD; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
         crumbL = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         crumbS = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; visibility = View.GONE; addView(crumbL, -2, -1) }
-        cancelV = tv("İptal", 18f, Color.WHITE).apply { typeface = Typeface.DEFAULT_BOLD; maxLines = 1; gravity = Gravity.CENTER_VERTICAL; visibility = View.GONE; setPadding(dp(12), 0, 0, 0); setOnClickListener { sel.clear(); refresh() } }
+        cancelV = tv("İptal", 18f, Color.WHITE).apply { typeface = Typeface.DEFAULT_BOLD; maxLines = 1; gravity = Gravity.CENTER_VERTICAL; visibility = View.GONE; setPadding(dp(12), 0, 0, 0); setOnClickListener { sel.clear(); editMode = false; refresh() } }
+        selAllV = ImageView(this).apply {
+            setImageDrawable(Icons.selectAll()); setColorFilter(Color.WHITE); setPadding(dp(8), dp(8), dp(8), dp(8)); visibility = View.GONE
+            contentDescription = "Tümünü seç"
+            setOnClickListener {
+                val all = items()
+                if (all.isNotEmpty() && sel.containsAll(all)) sel.clear() else sel.addAll(all)
+                refresh()
+            }
+        }
+        penV = ImageView(this).apply {
+            setImageDrawable(Icons.rename()); setColorFilter(Color.WHITE); setPadding(dp(8), dp(8), dp(8), dp(8)); visibility = View.GONE
+            contentDescription = "Seç"; setOnClickListener { editMode = true; refresh() }
+        }
         pinV = ImageView(this).apply {
             setImageDrawable(Icons.pin()); setColorFilter(Color.WHITE); setPadding(dp(8), dp(8), dp(8), dp(8)); visibility = View.GONE
             contentDescription = "Ana ekrana sabitle"; setOnClickListener { pinSelected() }
@@ -102,7 +117,10 @@ class MainActivity : Activity() {
             addView(titleRow, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER_VERTICAL))
             addView(crumbS, FrameLayout.LayoutParams(-1, -1))
         }
-        tb.setPadding(dp(12), 0, dp(12), 0); tb.addView(center, LinearLayout.LayoutParams(0, -1, 1f)); tb.addView(cancelV, LinearLayout.LayoutParams(-2, -1))
+        tb.setPadding(dp(12), 0, dp(12), 0); tb.addView(center, LinearLayout.LayoutParams(0, -1, 1f))
+        tb.addView(selAllV, LinearLayout.LayoutParams(dp(40), dp(40)))
+        tb.addView(cancelV, LinearLayout.LayoutParams(-2, -1))
+        tb.addView(penV, LinearLayout.LayoutParams(dp(40), dp(40)))
         body = FrameLayout(this)
         dock = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(dockBg) }
         col.addView(tb, -1, dp(54)); col.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -150,7 +168,10 @@ class MainActivity : Activity() {
         pinV.visibility = if (sel.isNotEmpty()) View.VISIBLE else View.GONE
         crumbS.visibility = if (crumbs) View.VISIBLE else View.GONE
         if (crumbs) buildCrumbs()
-        cancelV.visibility = if (sel.isNotEmpty()) View.VISIBLE else View.GONE
+        cancelV.visibility = if (editMode) View.VISIBLE else View.GONE
+        selAllV.visibility = if (editMode) View.VISIBLE else View.GONE
+        val canEdit = !editMode && !appsMode && pendingShare == null && !picking && (cur != null || list != null) && !(list != null && gal)
+        penV.visibility = if (canEdit) View.VISIBLE else View.GONE
     }
 
     private fun buildCrumbs() {
@@ -240,7 +261,7 @@ class MainActivity : Activity() {
     private fun slotsChanged() { updateDock(); if (cur == null && list == null && !picking && !appsMode) home() }
 
     private fun home() {
-        cur = null; list = null; sel.clear(); picking = false; appsMode = false; pendingShare = null; body.removeAllViews()
+        cur = null; list = null; sel.clear(); editMode = false; picking = false; appsMode = false; pendingShare = null; body.removeAllViews()
         chrome("Dosyalarım")
         val g = GridLayout(this).apply { columnCount = 3; setPadding(dp(6), dp(16), dp(6), dp(16)) }
         fun tile(ic: String, name: String, sub: String, click: () -> Unit, long: (() -> Unit)? = null, res: Drawable? = null, dashed: Boolean = false) {
@@ -296,7 +317,7 @@ class MainActivity : Activity() {
     }
 
     private fun openApps() {
-        cur = null; list = null; sel.clear(); picking = false; appsMode = true
+        cur = null; list = null; sel.clear(); editMode = false; picking = false; appsMode = true
         chrome("Uygulamalar")
         apps = emptyList()
         val lv = ListView(this).apply { divider = ColorDrawable(0xFF2E2E2E.toInt()); dividerHeight = dp(1); setBackgroundColor(bg) }
@@ -337,7 +358,7 @@ class MainActivity : Activity() {
         if (sel.isEmpty()) return
         val l = pinList().toMutableList(); var n = 0
         sel.forEach { f -> if (l.none { it.path == f.path }) { l.add(f); n++ } }
-        savePins(l); sel.clear()
+        savePins(l); sel.clear(); editMode = false
         Toast.makeText(this, if (n > 0) "$n öğe ana ekrana sabitlendi" else "Zaten sabitlenmiş", Toast.LENGTH_SHORT).show()
         refresh()
     }
@@ -350,8 +371,8 @@ class MainActivity : Activity() {
 
     private fun setSlot(n: Int, f: File) { prefs.edit().putString("slot$n", f.path).apply(); slotsChanged() }
 
-    private fun browse(d: File) { appsMode = false; cur = d; list = null; sel.clear(); refresh() }
-    private fun openList(t: String, l: List<File>, g: Boolean = false) { appsMode = false; gal = g; list = l; listTitle = t; sel.clear(); refresh() }
+    private fun browse(d: File) { appsMode = false; cur = d; list = null; sel.clear(); editMode = false; refresh() }
+    private fun openList(t: String, l: List<File>, g: Boolean = false) { appsMode = false; gal = g; list = l; listTitle = t; sel.clear(); editMode = false; refresh() }
 
     private fun items(): List<File> {
         val base = list ?: (cur?.listFiles()?.toList() ?: emptyList())
@@ -365,7 +386,7 @@ class MainActivity : Activity() {
 
     private fun refresh() {
         val l = items()
-        chrome(if (sel.isNotEmpty()) "${sel.size} seçili" else if (list != null) listTitle else if (cur == root) "Ana bellek" else cur?.name ?: "", cur != null && list == null && sel.isEmpty())
+        chrome(if (editMode) "${sel.size} seçili" else if (list != null) listTitle else if (cur == root) "Ana bellek" else cur?.name ?: "", cur != null && list == null && !editMode)
         if (list != null && gal) { body.removeAllViews(); body.addView(galleryView(l)); return }
         val lv = ListView(this).apply { divider = ColorDrawable(0xFF2E2E2E.toInt()); dividerHeight = dp(1); setBackgroundColor(bg) }
         lv.adapter = object : BaseAdapter() {
@@ -375,6 +396,13 @@ class MainActivity : Activity() {
             override fun getView(p: Int, v: View?, parent: android.view.ViewGroup?): View {
                 val f = l[p]
                 val row = LinearLayout(this@MainActivity).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(12), dp(5), dp(12), dp(5)); if (f in sel) setBackgroundColor(0xFF2C3E50.toInt()) }
+                if (editMode) {
+                    val on = f in sel
+                    row.addView(TextView(this@MainActivity).apply {
+                        text = if (on) "✓" else ""; textSize = 15f; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD; gravity = Gravity.CENTER
+                        background = GradientDrawable().apply { cornerRadius = dp(5).toFloat(); setColor(if (on) 0xFF4A90D9.toInt() else Color.TRANSPARENT); setStroke(dp(2), if (on) 0xFF4A90D9.toInt() else 0xFF888888.toInt()) }
+                    }, LinearLayout.LayoutParams(dp(24), dp(24)).apply { setMargins(0, 0, dp(12), 0) })
+                }
                 row.addView(iconView(f), dp(48), dp(48))
                 val c = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
                 c.addView(tv(f.name, 19f, Color.WHITE).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
@@ -384,14 +412,20 @@ class MainActivity : Activity() {
                 return row
             }
         }
-        lv.setOnItemClickListener { _, _, p, _ -> val f = l[p]; if (sel.isNotEmpty()) toggle(f) else if (f.isDirectory) browse(f) else if (f.extension.lowercase() == "zip") zipDialog(f) else open(f) }
+        lv.setOnItemClickListener { _, _, p, _ -> val f = l[p]; if (editMode) toggle(f) else if (f.isDirectory) browse(f) else if (f.extension.lowercase() == "zip") zipDialog(f) else open(f) }
         lv.setOnItemLongClickListener { _, v, p, _ ->
             if (pendingShare != null) return@setOnItemLongClickListener true
-            val f = l[p]; val was = f in sel
-            if (!was) sel.add(f)
-            val payload = sel.joinToString("\n") { it.absolutePath }
-            try { v.startDragAndDrop(ClipData.newPlainText("dosya", payload), View.DragShadowBuilder(v), null, 0) } catch (e: Exception) {}
-            if (!was) refresh()
+            val f = l[p]
+            if (editMode) {
+                // seçili öğelerden birine basılı tutunca seçilenleri alttaki klasörlere sürükle
+                if (f in sel) {
+                    val payload = sel.joinToString("\n") { it.absolutePath }
+                    try { v.startDragAndDrop(ClipData.newPlainText("dosya", payload), View.DragShadowBuilder(v), null, 0) } catch (e: Exception) {}
+                }
+            } else if (f.isFile && (f.extension.lowercase() in IMG || f.extension.lowercase() in VID)) {
+                // resim/video: basılı tutunca onay ve bildirim olmadan sil
+                if (removeMedia(f)) refresh()
+            }
             true
         }
         val wrap = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -399,7 +433,7 @@ class MainActivity : Activity() {
         wrap.addView(lv, LinearLayout.LayoutParams(-1, 0, 1f))
         if (pendingShare != null) wrap.addView(saveBar(), -1, -2)
         else if (picking) wrap.addView(Button(this).apply { text = "Bu klasörü seç"; setOnClickListener { if (slotPick in 0..3) setSlot(slotPick, cur!!); slotPick = -1; home() } }, -1, -2)
-        else if (clip.isNotEmpty() && cur != null && list == null && sel.isEmpty()) wrap.addView(pasteBar(), -1, dp(52))
+        else if (clip.isNotEmpty() && cur != null && list == null && !editMode) wrap.addView(pasteBar(), -1, dp(52))
         body.removeAllViews(); body.addView(wrap)
     }
 
@@ -461,7 +495,6 @@ class MainActivity : Activity() {
             list = list?.filter { it.path != f.path }
             thumbs.remove(f.path)
             try { MediaScannerConnection.scanFile(this, arrayOf(f.path), null, null) } catch (e: Exception) {}
-            Toast.makeText(this, "Silindi: ${f.name}", Toast.LENGTH_SHORT).show()
         } else Toast.makeText(this, "Silinemedi: ${f.name}", Toast.LENGTH_SHORT).show()
         return ok
     }
@@ -744,8 +777,8 @@ class MainActivity : Activity() {
         add(Icons.share(), "Paylaş") {
             if (sel.none { it.isFile }) Toast.makeText(this, "Klasörleri paylaşmak için önce sıkıştırın", Toast.LENGTH_SHORT).show() else share()
         }
-        add(Icons.move(), "Taşı") { clip = sel.toList(); cut = true; sel.clear(); refresh(); Toast.makeText(this, "Hedef klasöre gidip Yapıştır'a basın", Toast.LENGTH_SHORT).show() }
-        add(Icons.copy(), "Kopyala") { clip = sel.toList(); cut = false; sel.clear(); refresh(); Toast.makeText(this, "Hedef klasöre gidip Yapıştır'a basın", Toast.LENGTH_SHORT).show() }
+        add(Icons.move(), "Taşı") { clip = sel.toList(); cut = true; sel.clear(); editMode = false; refresh(); Toast.makeText(this, "Hedef klasöre gidip Yapıştır'a basın", Toast.LENGTH_SHORT).show() }
+        add(Icons.copy(), "Kopyala") { clip = sel.toList(); cut = false; sel.clear(); editMode = false; refresh(); Toast.makeText(this, "Hedef klasöre gidip Yapıştır'a basın", Toast.LENGTH_SHORT).show() }
         add(Icons.zip(), "Sıkıştır") { zipSelected() }
         val zips = sel.filter { it.isFile && it.extension.lowercase() == "zip" }
         if (zips.isNotEmpty()) add(Icons.unzip(), "Zip'i\naç") { val z = zips.toList(); sel.clear(); z.forEach { unzip(it) } }
@@ -878,7 +911,7 @@ class MainActivity : Activity() {
         i.clipData?.let { cd -> for (k in 0 until cd.itemCount) cd.getItemAt(k).uri?.let { us.add(it) } }
         if (us.isEmpty()) { Toast.makeText(this, "Paylaşılan dosya bulunamadı", Toast.LENGTH_SHORT).show(); return }
         pendingShare = us.toList()
-        slotPick = -1; picking = true; appsMode = false; list = null; sel.clear()
+        slotPick = -1; picking = true; appsMode = false; list = null; sel.clear(); editMode = false
         val last = File(prefs.getString("lastSave", null) ?: "")
         browse(if (last.isDirectory) last else root)
     }
@@ -958,7 +991,7 @@ class MainActivity : Activity() {
     override fun onBackPressed() {
         when {
             pendingShare != null -> { val c = cur; if (c == null || c == root || c.parentFile?.canRead() != true) cancelShare() else browse(c.parentFile!!) }
-            sel.isNotEmpty() -> { sel.clear(); refresh() }
+            editMode -> { sel.clear(); editMode = false; refresh() }
             appsMode -> home()
             list != null -> { list = null; if (cur != null) refresh() else home() }
             cur != null -> { val c = cur!!; if (c == root || c.parentFile?.canRead() != true) home() else browse(c.parentFile!!) }
