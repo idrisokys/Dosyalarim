@@ -62,6 +62,7 @@ class MainActivity : Activity() {
     private var pendingShare: List<Uri>? = null   // dışarıdan paylaşılan, kaydedilmeyi bekleyen dosyalar
     private var gal = false
     private var viewer: Viewer? = null
+    private var editor: TextEditor? = null
     private class AppRow(val label: String, val pkg: String, val size: Long, val time: Long, val ai: ApplicationInfo)
     private var apps = listOf<AppRow>()
     private var appAdapter: BaseAdapter? = null
@@ -73,6 +74,7 @@ class MainActivity : Activity() {
     private val VID = setOf("mp4", "mkv", "avi", "mov", "webm", "3gp", "m4v")
     private val AUD = setOf("mp3", "m4a", "wav", "flac", "ogg", "aac", "opus")
     private val DOC = setOf("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "odt", "rtf", "csv", "epub")
+    private val TXT = setOf("txt", "md", "log", "json", "xml", "ini", "conf", "cfg", "yml", "yaml", "properties", "js", "css", "kt", "kts", "java", "py", "sh", "gradle", "srt", "tex")
     private val df = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault())
 
     private fun dp(x: Int) = (x * resources.displayMetrics.density).toInt()
@@ -104,6 +106,7 @@ class MainActivity : Activity() {
         penV = ImageView(this).apply {
             setImageDrawable(Icons.rename()); setColorFilter(Color.WHITE); setPadding(dp(8), dp(8), dp(8), dp(8)); visibility = View.GONE
             contentDescription = "Seç"; setOnClickListener { editMode = true; refresh(true) }
+            setOnLongClickListener { newFolder(); true }
         }
         pinV = ImageView(this).apply {
             setImageDrawable(Icons.pin()); setColorFilter(Color.WHITE); setPadding(dp(8), dp(8), dp(8), dp(8)); visibility = View.GONE
@@ -264,10 +267,10 @@ class MainActivity : Activity() {
         cur = null; list = null; sel.clear(); editMode = false; picking = false; appsMode = false; pendingShare = null; body.removeAllViews()
         chrome("Dosyalarım")
         val g = GridLayout(this).apply { columnCount = 3; setPadding(dp(6), dp(16), dp(6), dp(16)) }
-        fun tile(ic: String, name: String, sub: String, click: () -> Unit, long: (() -> Unit)? = null, res: Drawable? = null, dashed: Boolean = false) {
+        fun tile(ic: String, name: String, sub: String, click: () -> Unit, long: (() -> Unit)? = null, res: Drawable? = null, dashed: Boolean = false, big: Boolean = false) {
             val t = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setPadding(dp(2), dp(8), dp(2), dp(12)) }
             val i: View = when {
-                res != null -> ImageView(this).apply { setImageDrawable(res); setPadding(dp(2), dp(2), dp(2), dp(2)) }
+                res != null -> ImageView(this).apply { setImageDrawable(res); if (!big) setPadding(dp(2), dp(2), dp(2), dp(2)) }
                 dashed -> ImageView(this).apply {
                     setImageDrawable(Icons.add()); setColorFilter(0xFF888888.toInt()); setPadding(dp(30), dp(30), dp(30), dp(30))
                     background = GradientDrawable().apply { setColor(Color.TRANSPARENT); cornerRadius = dp(26).toFloat(); setStroke(dp(2), 0xFF555555.toInt(), dp(6).toFloat(), dp(4).toFloat()) }
@@ -277,22 +280,25 @@ class MainActivity : Activity() {
                     background = GradientDrawable().apply { setColor(card); cornerRadius = dp(20).toFloat(); setStroke(dp(1), 0xFF3A3A3A.toInt()) }
                 }
             }
-            t.addView(i, dp(84), dp(84))
+            val isz = if (big) 100 else 84
+            val slot = FrameLayout(this).apply { addView(i, FrameLayout.LayoutParams(dp(isz), dp(isz), Gravity.CENTER)) }
+            t.addView(slot, dp(100), dp(100))
             t.addView(tv(name, 17f, if (dashed) 0xFF888888.toInt() else 0xFFEEEEEE.toInt()).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER; setPadding(0, dp(6), 0, 0) })
             t.setOnClickListener { click() }
             if (long != null) t.setOnLongClickListener { long(); true }
             g.addView(t, GridLayout.LayoutParams(GridLayout.spec(GridLayout.UNDEFINED), GridLayout.spec(GridLayout.UNDEFINED, 1f)).apply { width = 0 })
         }
-        fun cat(k: String, ic: String, n: String, res: Drawable? = null) {
-            tile(ic, n, "", { openList(n, cats[k] ?: emptyList(), true) }, null, res)
+        fun cat(k: String, ic: String, n: String, res: Drawable? = null, big: Boolean = false) {
+            tile(ic, n, "", { openList(n, cats[k] ?: emptyList(), true) }, null, res, false, big)
         }
         tile("", "Ana bellek", "", { browse(root) }, null, Icons.homeColor())
         tile("📥", "İndirilenler", "", { browse(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)) }, null, Icons.folder())
-        cat("img", "🖼", "Görüntüler")
-        tile("", "Uygulamalar", "", { openApps() }, null, Icons.androidApp())
+        cat("img", "🖼", "Görüntüler", Icons.gallery(), true)
+        tile("", "Uygulamalar", "", { openApps() }, null, Icons.androidApp(), false, true)
+        tile("", "Metin düzenleyici", "", { openEditor(null) }, null, Icons.textEditor())
         pinList().filter { it.exists() }.forEach { f ->
             tile("", f.name, "", {
-                if (f.isDirectory) browse(f) else if (f.extension.lowercase() == "zip") zipDialog(f) else open(f)
+                if (f.isDirectory) browse(f) else openAny(f)
             }, {
                 savePins(pinList().filter { it.path != f.path })
                 Toast.makeText(this, "Sabitleme kaldırıldı: ${f.name}", Toast.LENGTH_SHORT).show(); home()
@@ -382,7 +388,7 @@ class MainActivity : Activity() {
     }
 
     private fun iconView(f: File): View =
-        ImageView(this).apply { setImageDrawable(if (f.isDirectory) Icons.folder() else Icons.file()); setPadding(dp(1), dp(1), dp(1), dp(1)) }
+        ImageView(this).apply { setImageDrawable(if (f.isDirectory) Icons.folder() else if (f.extension.lowercase() in TXT) Icons.docBlue() else Icons.file()); setPadding(dp(1), dp(1), dp(1), dp(1)) }
 
     private var curLv: ListView? = null
     private var curAdapter: BaseAdapter? = null
@@ -448,7 +454,7 @@ class MainActivity : Activity() {
             }
         }
         curAdapter = lv.adapter as? BaseAdapter
-        lv.setOnItemClickListener { _, _, p, _ -> val f = l[p]; if (editMode) Unit else if (f.isDirectory) browse(f) else if (f.extension.lowercase() == "zip") zipDialog(f) else open(f) }
+        lv.setOnItemClickListener { _, _, p, _ -> val f = l[p]; if (editMode) Unit else if (f.isDirectory) browse(f) else openAny(f) }
         lv.setOnItemLongClickListener { _, v, p, _ ->
             if (pendingShare != null) return@setOnItemLongClickListener true
             val f = l[p]
@@ -787,7 +793,7 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() { super.onPause(); viewer?.pauseVideo() }
-    override fun onDestroy() { viewer?.dlg?.dismiss(); super.onDestroy() }
+    override fun onDestroy() { viewer?.dlg?.dismiss(); editor?.dismiss(); super.onDestroy() }
 
     private fun barBtn(ic: Drawable, label: String, enabled: Boolean, act: () -> Unit): View {
         val b = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; alpha = if (enabled) 1f else 0.35f }
@@ -827,8 +833,22 @@ class MainActivity : Activity() {
         b.addView(ImageView(this).apply { setImageDrawable(Icons.paste()); setColorFilter(Color.WHITE) }, dp(24), dp(24))
         b.addView(tv("Buraya ${if (cut) "taşı" else "kopyala"} (${clip.size})", 15f, Color.WHITE).apply { setPadding(dp(12), 0, 0, 0) }, LinearLayout.LayoutParams(0, -2, 1f))
         b.setOnClickListener { paste() }
+        b.addView(ImageView(this).apply { setImageDrawable(Icons.newFolder()); setColorFilter(Color.WHITE); setPadding(dp(10), dp(10), dp(10), dp(10)); contentDescription = "Yeni klasör"; setOnClickListener { newFolder() } }, dp(44), dp(44))
         b.addView(ImageView(this).apply { setImageDrawable(Icons.close()); setColorFilter(0xFFBBBBBB.toInt()); setPadding(dp(10), dp(10), dp(10), dp(10)); setOnClickListener { clip = listOf(); refresh() } }, dp(44), dp(44))
         return b
+    }
+
+    /** Şu an açık olan klasörde yeni klasör oluşturur. */
+    private fun newFolder() {
+        val d = cur
+        if (d == null || list != null) { Toast.makeText(this, "Yeni klasör için bir klasörün içine girin", Toast.LENGTH_SHORT).show(); return }
+        input("Yeni klasör", "Yeni klasör") { n ->
+            val name = n.replace("/", "_")
+            if (name.isNotEmpty()) {
+                val t = uniq(d, name)
+                if (t.mkdirs()) refresh(true) else Toast.makeText(this, "Klasör oluşturulamadı", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     private fun uniq(d: File, name: String): File {
@@ -905,6 +925,21 @@ class MainActivity : Activity() {
     private fun toggle(f: File) { if (!sel.remove(f)) sel.add(f); selectionChanged() }
 
     private fun uri(f: File) = KFileProvider.uriFor(this, f)
+
+    private fun isText(f: File) = f.extension.lowercase() in TXT && f.length() <= 1_000_000
+
+    private fun openAny(f: File) {
+        if (f.extension.lowercase() == "zip") zipDialog(f) else if (isText(f)) openEditor(f) else open(f)
+    }
+
+    private fun openEditor(f: File?) {
+        editor?.dismiss()
+        val dir = f?.parentFile ?: cur ?: File(root, "Documents")
+        editor = TextEditor(this, f, dir) {
+            if (cur != null || list != null) refresh(true)
+            scan()
+        }.also { it.show() }
+    }
 
     private fun open(f: File) {
         val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(f.extension.lowercase()) ?: "*/*"

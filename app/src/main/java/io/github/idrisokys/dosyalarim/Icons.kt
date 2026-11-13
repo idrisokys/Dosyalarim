@@ -9,7 +9,7 @@ import android.graphics.drawable.Drawable
 import androidx.core.graphics.PathParser
 
 /** SVG path verisinden çizilen, XML gerektirmeyen ikon. */
-class PathIcon(private val vp: Float, private val layers: List<Pair<String, Int>>) : Drawable() {
+class PathIcon(private val vp: Float, private val layers: List<Pair<String, Int>>, private val vx: Float = 0f, private val vy: Float = 0f) : Drawable() {
     private val items = layers.map { (d, c) ->
         Path(PathParser.createPathFromPathData(d)) to Paint(Paint.ANTI_ALIAS_FLAG).apply { color = c; style = Paint.Style.FILL }
     }
@@ -20,6 +20,7 @@ class PathIcon(private val vp: Float, private val layers: List<Pair<String, Int>
         canvas.save()
         canvas.translate(b.left + (b.width() - vp * sc) / 2f, b.top + (b.height() - vp * sc) / 2f)
         canvas.scale(sc, sc)
+        canvas.translate(-vx, -vy)
         items.forEach { (p, paint) -> canvas.drawPath(p, paint) }
         canvas.restore()
     }
@@ -57,20 +58,44 @@ object Icons {
 
     fun pin() = m("M16,9V4l1,0c0.55,0 1,-0.45 1,-1v0c0,-0.55 -0.45,-1 -1,-1H7C6.45,2 6,2.45 6,3v0c0,0.55 0.45,1 1,1l1,0v5c0,1.66 -1.34,3 -3,3h0v2h5.97v7l1,1l1,-1v-7H19v-2h0C17.34,12 16,10.66 16,9z")
 
-    /** Uygulamalar: koyu yuvarlak kare, ince açık çerçeve, yeşil Android robotu. */
+    /** Uygulamalar: çerçevesiz, ikonun tamamını dolduran büyük yeşil Android robotu. */
     fun androidApp(): PathIcon {
-        val g = 0xFFA4C639.toInt(); val d = 0xFF1E1E1E.toInt()
-        return PathIcon(100f, listOf(
-            "M22,4 L78,4 Q96,4 96,22 L96,78 Q96,96 78,96 L22,96 Q4,96 4,78 L4,22 Q4,4 22,4 Z" to 0xFFE0E0E0.toInt(),
-            "M22,7 L78,7 Q93,7 93,22 L93,78 Q93,93 78,93 L22,93 Q7,93 7,78 L7,22 Q7,7 22,7 Z" to d,
+        val g = 0xFFA4C639.toInt(); val d = 0xFF121212.toInt()
+        // 54x54'lük pencere robotun etrafına sıkı oturur (çerçeve yok, robot ~1.85x büyük)
+        return PathIcon(54f, listOf(
             "M37,42 A13,13 0 0 1 63,42 Z" to g,
             "M39.6,27 L41.2,25.8 L45.2,31.5 L43.6,32.7 Z M60.4,27 L58.8,25.8 L54.8,31.5 L56.4,32.7 Z" to g,
             "M37,45 L63,45 L63,60 Q63,63.5 59.5,63.5 L40.5,63.5 Q37,63.5 37,60 Z" to g,
             "M42,60 L46.5,60 L46.5,69 Q46.5,72 44.25,72 Q42,72 42,69 Z M53.5,60 L58,60 L58,69 Q58,72 55.75,72 Q53.5,72 53.5,69 Z" to g,
             "M32,45 Q34.5,45 34.5,47.5 L34.5,57 Q34.5,60 32,60 Q29.5,60 29.5,57 L29.5,47.5 Q29.5,45 32,45 Z M68,45 Q70.5,45 70.5,47.5 L70.5,57 Q70.5,60 68,60 Q65.5,60 65.5,57 L65.5,47.5 Q65.5,45 68,45 Z" to g,
             "M44.1,37 a1.4,1.4 0 1 0 2.8,0 a1.4,1.4 0 1 0 -2.8,0 Z M53.1,37 a1.4,1.4 0 1 0 2.8,0 a1.4,1.4 0 1 0 -2.8,0 Z" to d
-        ))
+        ), 23f, 22f)
     }
+
+    /** Görüntüler: arkada ikinci fotoğraf, önde güneşli dağ manzarası (çerçevesiz, renkli). */
+    fun gallery() = PathIcon(100f, listOf(
+        "M28,6 L84,6 Q94,6 94,16 L94,62 Q94,72 84,72 L28,72 Q18,72 18,62 L18,16 Q18,6 28,6 Z" to 0xFF9DB7E0.toInt(),
+        "M16,20 L76,20 Q86,20 86,30 L86,80 Q86,90 76,90 L16,90 Q6,90 6,80 L6,30 Q6,20 16,20 Z" to 0xFF4FA3F0.toInt(),
+        "M61,38 a8,8 0 1 0 16,0 a8,8 0 1 0 -16,0 Z" to 0xFFFFD54F.toInt(),
+        "M6,70 L30,46 L52,70 L68,56 L86,72 L86,80 Q86,90 76,90 L16,90 Q6,90 6,80 Z" to 0xFF6CC38A.toInt(),
+        "M6,80 L24,64 L42,80 L60,67 L86,80 Q86,90 76,90 L16,90 Q6,90 6,80 Z" to 0xFF2E8B57.toInt()
+    ))
+
+    /** Metin düzenleyici: beyaz not sayfası, satırlar ve turuncu kalem. */
+    fun textEditor() = PathIcon(100f, listOf(
+        "M24,8 L58,8 L80,30 L80,86 Q80,92 74,92 L24,92 Q18,92 18,86 L18,14 Q18,8 24,8 Z" to 0xFFF2F2F2.toInt(),
+        "M58,8 L80,30 L64,30 Q58,30 58,24 Z" to 0xFFCFCFCF.toInt(),
+        "M28,40 L70,40 L70,44 L28,44 Z M28,50 L70,50 L70,54 L28,54 Z M28,60 L56,60 L56,64 L28,64 Z" to 0xFF8A8A8A.toInt(),
+        "M46,90 L57.3,87.2 L48.8,78.7 Z" to 0xFFF5D6A8.toInt(),
+        "M48.8,78.7 L57.3,87.2 L86.5,57.9 L78.1,49.5 Z" to 0xFFFF9800.toInt(),
+        "M78.1,49.5 L86.5,57.9 L92.2,52.2 L83.8,43.8 Z" to 0xFFEF5350.toInt()
+    ))
+
+    fun newFolder() = m("M20,6h-8l-2,-2H4c-1.11,0 -1.99,0.89 -1.99,2L2,18c0,1.11 0.89,2 2,2h16c1.1,0 2,-0.9 2,-2V8c0,-1.1 -0.9,-2 -2,-2zM19,14h-3v3h-2v-3h-3v-2h3V9h2v3h3v2z")
+    fun save() = m("M17,3H5c-1.11,0 -2,0.9 -2,2v14c0,1.1 0.89,2 2,2h14c1.1,0 2,-0.9 2,-2V7l-4,-4zM12,19c-1.66,0 -3,-1.34 -3,-3s1.34,-3 3,-3 3,1.34 3,3 -1.34,3 -3,3zM15,9H5V5h10v4z")
+    fun more() = m("M12,8c1.1,0 2,-0.9 2,-2s-0.9,-2 -2,-2 -2,0.9 -2,2 0.9,2 2,2zM12,10c-1.1,0 -2,0.9 -2,2s0.9,2 2,2 2,-0.9 2,-2 -0.9,-2 -2,-2zM12,16c-1.1,0 -2,0.9 -2,2s0.9,2 2,2 2,-0.9 2,-2 -0.9,-2 -2,-2z")
+    fun undo() = m("M12.5,8c-2.65,0 -5.05,0.99 -6.9,2.6L2,7v9h9l-3.62,-3.62c1.39,-1.16 3.16,-1.88 5.12,-1.88 3.54,0 6.55,2.31 7.6,5.5l2.37,-0.78C21.08,11.03 17.15,8 12.5,8z")
+    fun redo() = m("M18.4,10.6C16.55,8.99 14.15,8 11.5,8c-4.65,0 -8.58,3.03 -9.96,7.22L3.9,16c1.05,-3.19 4.05,-5.5 7.6,-5.5 1.95,0 3.73,0.72 5.12,1.88L13,16h9V7l-3.6,3.6z")
 
     fun back() = m("M20,11H7.83l5.59,-5.59L12,4l-8,8 8,8 1.41,-1.41L7.83,13H20v-2z")
     fun play() = m("M8,5v14l11,-7z")
