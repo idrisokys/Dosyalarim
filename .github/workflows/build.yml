@@ -37,6 +37,6 @@ jobs:
       - name: APK'yı yükle
         uses: actions/upload-artifact@v4
         with:
-          name: DosyaYonetici-debug
+          name: Dosyalarim-debug
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error

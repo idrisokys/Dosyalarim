@@ -1,4 +1,4 @@
-package io.github.idrisokys.filemanager
+package io.github.idrisokys.dosyalarim
 
 import android.Manifest
 import android.app.Activity
@@ -18,6 +18,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.os.StatFs
+import android.provider.OpenableColumns
 import android.provider.Settings
 import android.text.TextUtils
 import android.view.Gravity
@@ -56,6 +57,7 @@ class MainActivity : Activity() {
     private var clip = listOf<File>(); private var cut = false
     private var showHidden = true; private var asked = false
     private var appsMode = false
+    private var pendingShare: List<Uri>? = null   // dışarıdan paylaşılan, kaydedilmeyi bekleyen dosyalar
     private var gal = false
     private var viewer: Viewer? = null
     private class AppRow(val label: String, val pkg: String, val size: Long, val time: Long, val ai: ApplicationInfo)
@@ -107,6 +109,13 @@ class MainActivity : Activity() {
         col.addView(View(this).apply { setBackgroundColor(0xFF333333.toInt()) }, -1, dp(1))
         col.addView(dock, -1, dp(100))
         setContentView(col); migratePins(); updateDock(); home()
+        if (s == null && (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0) handleShare(intent)
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleShare(intent)
     }
 
     private fun hasPerm() = if (Build.VERSION.SDK_INT >= 30) Environment.isExternalStorageManager()
@@ -126,7 +135,8 @@ class MainActivity : Activity() {
         Thread {
             val all = ArrayList<File>()
             val skip = File(root, "Android")
-            root.walkTopDown().onEnter { it != skip }.filter { it.isFile }.forEach { all.add(it) }
+            root.walkTopDown().onEnter { it != skip && (it == root || !it.name.startsWith(".")) }
+                .filter { it.isFile && !it.name.startsWith(".") }.forEach { all.add(it) }
             val m = HashMap<String, List<File>>()
             m["img"] = all.filter { val e = it.extension.lowercase(); (e in IMG || e in VID) && !it.name.startsWith(".trashed") && !it.name.startsWith(".pending") }
             cats = m
@@ -147,7 +157,7 @@ class MainActivity : Activity() {
         crumbL.removeAllViews()
         fun chev() = ImageView(this).apply { setImageDrawable(Icons.chevron()); setColorFilter(0xFF888888.toInt()) }
         val last = cur ?: return
-        crumbL.addView(ImageView(this).apply { setImageDrawable(Icons.homeColor()); setOnClickListener { home() } }, dp(34), dp(34))
+        crumbL.addView(ImageView(this).apply { setImageDrawable(Icons.homeColor()); setOnClickListener { if (pendingShare != null) browse(root) else home() } }, dp(34), dp(34))
         crumbL.addView(chev(), dp(24), dp(24))
         crumbL.addView(ImageView(this).apply { setImageDrawable(Icons.folder()); setOnClickListener { browse(root) } }, dp(34), dp(34))
         val chain = ArrayList<File>(); var f: File? = last
@@ -173,12 +183,12 @@ class MainActivity : Activity() {
                     background = GradientDrawable().apply { setColor(Color.TRANSPARENT); cornerRadius = dp(8).toFloat(); setStroke(dp(1), 0xFF555555.toInt(), dp(4).toFloat(), dp(3).toFloat()) }
                 }, dp(54), dp(54))
                 v.addView(tv("Ekle", 14f, 0xFF888888.toInt()).apply { gravity = Gravity.CENTER })
-                v.setOnClickListener { slotPick = n; picking = true; browse(root) }
+                v.setOnClickListener { if (pendingShare != null) return@setOnClickListener; slotPick = n; picking = true; browse(root) }
             } else {
                 v.addView(ImageView(this).apply { setImageDrawable(Icons.folder()) }, dp(54), dp(54))
                 v.addView(tv(f.name, 14f, 0xFFCCCCCC.toInt()).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER; setPadding(dp(2), 0, dp(2), 0) })
-                v.setOnClickListener { if (f.isDirectory) { picking = false; list = null; browse(f) } else Toast.makeText(this, "Klasör bulunamadı", Toast.LENGTH_SHORT).show() }
-                v.setOnLongClickListener { slotMenu(n); true }
+                v.setOnClickListener { if (f.isDirectory) { if (pendingShare == null) { picking = false; list = null }; browse(f) } else Toast.makeText(this, "Klasör bulunamadı", Toast.LENGTH_SHORT).show() }
+                v.setOnLongClickListener { if (pendingShare == null) slotMenu(n); true }
                 // dosyaları bu klasöre sürükleyip bırakınca taşı
                 v.setOnDragListener { view, e ->
                     when (e.action) {
@@ -230,8 +240,8 @@ class MainActivity : Activity() {
     private fun slotsChanged() { updateDock(); if (cur == null && list == null && !picking && !appsMode) home() }
 
     private fun home() {
-        cur = null; list = null; sel.clear(); picking = false; appsMode = false; body.removeAllViews()
-        chrome("Dosya Yöneticisi")
+        cur = null; list = null; sel.clear(); picking = false; appsMode = false; pendingShare = null; body.removeAllViews()
+        chrome("Dosyalarım")
         val g = GridLayout(this).apply { columnCount = 3; setPadding(dp(6), dp(16), dp(6), dp(16)) }
         fun tile(ic: String, name: String, sub: String, click: () -> Unit, long: (() -> Unit)? = null, res: Drawable? = null, dashed: Boolean = false) {
             val t = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setPadding(dp(2), dp(8), dp(2), dp(12)) }
@@ -376,6 +386,7 @@ class MainActivity : Activity() {
         }
         lv.setOnItemClickListener { _, _, p, _ -> val f = l[p]; if (sel.isNotEmpty()) toggle(f) else if (f.isDirectory) browse(f) else if (f.extension.lowercase() == "zip") zipDialog(f) else open(f) }
         lv.setOnItemLongClickListener { _, v, p, _ ->
+            if (pendingShare != null) return@setOnItemLongClickListener true
             val f = l[p]; val was = f in sel
             if (!was) sel.add(f)
             val payload = sel.joinToString("\n") { it.absolutePath }
@@ -386,7 +397,8 @@ class MainActivity : Activity() {
         val wrap = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         if (sel.isNotEmpty()) wrap.addView(selectionBar(), -1, dp(46))
         wrap.addView(lv, LinearLayout.LayoutParams(-1, 0, 1f))
-        if (picking) wrap.addView(Button(this).apply { text = "Bu klasörü seç"; setOnClickListener { if (slotPick in 0..3) setSlot(slotPick, cur!!); slotPick = -1; home() } }, -1, -2)
+        if (pendingShare != null) wrap.addView(saveBar(), -1, -2)
+        else if (picking) wrap.addView(Button(this).apply { text = "Bu klasörü seç"; setOnClickListener { if (slotPick in 0..3) setSlot(slotPick, cur!!); slotPick = -1; home() } }, -1, -2)
         else if (clip.isNotEmpty() && cur != null && list == null && sel.isEmpty()) wrap.addView(pasteBar(), -1, dp(52))
         body.removeAllViews(); body.addView(wrap)
     }
@@ -854,9 +866,98 @@ class MainActivity : Activity() {
         }.start()
     }
 
+    // ======================= PAYLAŞIMLA GELEN DOSYALARI KAYDET =======================
+    @Suppress("DEPRECATION")
+    private fun handleShare(i: Intent?) {
+        if (i == null || (i.action != Intent.ACTION_SEND && i.action != Intent.ACTION_SEND_MULTIPLE)) return
+        val us = LinkedHashSet<Uri>()
+        try {
+            if (i.action == Intent.ACTION_SEND) i.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)?.let { us.add(it) }
+            else i.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)?.let { us.addAll(it) }
+        } catch (e: Exception) {}
+        i.clipData?.let { cd -> for (k in 0 until cd.itemCount) cd.getItemAt(k).uri?.let { us.add(it) } }
+        if (us.isEmpty()) { Toast.makeText(this, "Paylaşılan dosya bulunamadı", Toast.LENGTH_SHORT).show(); return }
+        pendingShare = us.toList()
+        slotPick = -1; picking = true; appsMode = false; list = null; sel.clear()
+        val last = File(prefs.getString("lastSave", null) ?: "")
+        browse(if (last.isDirectory) last else root)
+    }
+
+    private fun cancelShare() { pendingShare = null; picking = false; finish() }
+
+    private fun saveBar(): View {
+        val n = pendingShare?.size ?: 0
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(0xFF2A2A2A.toInt()); setPadding(dp(8), dp(8), dp(8), dp(8)) }
+        box.addView(tv("$n dosya kaydedilecek • klasör seçin", 14f, 0xFFCCCCCC.toInt()).apply { setPadding(dp(4), 0, 0, dp(4)) })
+        val row = LinearLayout(this)
+        row.addView(Button(this).apply { text = "İptal"; setOnClickListener { cancelShare() } }, LinearLayout.LayoutParams(0, -2, 1f))
+        row.addView(Button(this).apply {
+            text = "Yeni klasör"
+            setOnClickListener {
+                val d = cur ?: root
+                input("Klasör adı", "") { nm ->
+                    val safe = nm.replace('/', '_').replace('\\', '_').trim()
+                    if (safe.isEmpty() || safe == "." || safe == "..") return@input
+                    val nd = File(d, safe)
+                    if (nd.isDirectory || nd.mkdirs()) browse(nd) else Toast.makeText(this@MainActivity, "Klasör oluşturulamadı", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        row.addView(Button(this).apply { text = "Buraya kaydet"; setOnClickListener { saveShared(cur ?: root) } }, LinearLayout.LayoutParams(0, -2, 1.3f))
+        box.addView(row)
+        return box
+    }
+
+    private fun shareName(u: Uri): String {
+        var name: String? = null
+        if (u.scheme == "content") try {
+            contentResolver.query(u, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c -> if (c.moveToFirst()) name = c.getString(0) }
+        } catch (e: Exception) {}
+        var s: String = name?.takeIf { it.isNotBlank() } ?: u.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() } ?: "dosya_${System.currentTimeMillis()}"
+        s = s.replace('/', '_').replace('\\', '_').trim()
+        if (s.isEmpty() || s == "." || s == "..") s = "dosya_${System.currentTimeMillis()}"
+        if (!s.contains('.')) {
+            val ext = try { contentResolver.getType(u)?.let { MimeTypeMap.getSingleton().getExtensionFromMimeType(it) } } catch (e: Exception) { null }
+            if (ext != null) s += ".$ext"
+        }
+        return s
+    }
+
+    private fun saveShared(dest: File) {
+        val us = pendingShare ?: return
+        if (!dest.isDirectory || !dest.canWrite()) { Toast.makeText(this, "Bu klasöre yazılamıyor", Toast.LENGTH_SHORT).show(); return }
+        pendingShare = null; picking = false
+        prefs.edit().putString("lastSave", dest.path).apply()
+        Toast.makeText(this, "Kaydediliyor…", Toast.LENGTH_SHORT).show()
+        Thread {
+            val saved = ArrayList<String>()
+            us.forEach { u ->
+                var out: File? = null
+                try {
+                    val o = uniq(dest, shareName(u)); out = o
+                    val ins = contentResolver.openInputStream(u) ?: throw IOException("açılamadı")
+                    ins.use { i -> FileOutputStream(o).use { i.copyTo(it) } }
+                    saved.add(o.path)
+                } catch (e: Exception) { try { out?.delete() } catch (x: Exception) {} }
+            }
+            runOnUiThread {
+                val msg = when {
+                    saved.isEmpty() -> "Dosya kaydedilemedi"
+                    saved.size == us.size -> "${saved.size} dosya ${dest.name} klasörüne kaydedildi"
+                    else -> "${saved.size}/${us.size} dosya kaydedildi"
+                }
+                Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+                browse(dest)
+            }
+            if (saved.isNotEmpty()) try { MediaScannerConnection.scanFile(this, saved.toTypedArray(), null, null) } catch (e: Exception) {}
+            scan()
+        }.start()
+    }
+
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         when {
+            pendingShare != null -> { val c = cur; if (c == null || c == root || c.parentFile?.canRead() != true) cancelShare() else browse(c.parentFile!!) }
             sel.isNotEmpty() -> { sel.clear(); refresh() }
             appsMode -> home()
             list != null -> { list = null; if (cur != null) refresh() else home() }

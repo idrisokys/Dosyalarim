@@ -1,4 +1,4 @@
-package io.github.idrisokys.filemanager
+package io.github.idrisokys.dosyalarim
 
 import android.content.ContentProvider
 import android.content.ContentValues
