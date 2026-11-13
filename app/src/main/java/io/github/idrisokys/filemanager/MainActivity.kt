@@ -4,10 +4,13 @@ import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.ActivityNotFoundException
+import android.content.ClipData
 import android.content.Intent
+import android.view.DragEvent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
@@ -29,8 +32,8 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 class MainActivity : Activity() {
-    private val bg = 0xFF121212.toInt(); private val bar = 0xFF212121.toInt(); private val card = 0xFF1E1E1E.toInt()
-    private lateinit var titleV: TextView; private lateinit var backB: TextView; private lateinit var body: FrameLayout
+    private val dockBg = 0xFF1A1A1A.toInt(); private val bg = 0xFF121212.toInt(); private val bar = 0xFF212121.toInt(); private val card = 0xFF1E1E1E.toInt()
+    private lateinit var titleV: TextView; private lateinit var backB: TextView; private lateinit var body: FrameLayout; private lateinit var crumbS: HorizontalScrollView; private lateinit var crumbL: LinearLayout; private lateinit var dock: LinearLayout
     private var cur: File? = null; private var list: List<File>? = null; private var listTitle = ""
     private var picking = false; private var slotPick = -1; private val sel = linkedSetOf<File>()
     private var clip = listOf<File>(); private var cut = false
@@ -60,10 +63,29 @@ class MainActivity : Activity() {
         backB = tv("☰", 24f, Color.WHITE).apply { gravity = Gravity.CENTER; setOnClickListener { if (cur == null && list == null) menu(it) else onBackPressed() } }
         titleV = tv("", 20f, Color.WHITE).apply { typeface = Typeface.DEFAULT_BOLD; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
         val mb = tv("⋮", 26f, Color.WHITE).apply { gravity = Gravity.CENTER; setOnClickListener { menu(it) } }
-        tb.addView(backB, dp(56), dp(56)); tb.addView(titleV, LinearLayout.LayoutParams(0, -2, 1f)); tb.addView(mb, dp(56), dp(56))
+        crumbL = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        crumbS = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; visibility = View.GONE; addView(crumbL, -2, -1) }
+        val center = FrameLayout(this).apply {
+            addView(titleV, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER_VERTICAL))
+            addView(crumbS, FrameLayout.LayoutParams(-1, -1))
+        }
+        tb.addView(backB, dp(56), dp(56)); tb.addView(center, LinearLayout.LayoutParams(0, -1, 1f)); tb.addView(mb, dp(56), dp(56))
         body = FrameLayout(this)
-        col.addView(tb, -1, dp(56)); col.addView(body, -1, -1)
-        setContentView(col); home()
+        dock = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(dockBg) }
+        dock.setOnDragListener { v, e ->
+            when (e.action) {
+                DragEvent.ACTION_DRAG_STARTED -> if (e.clipDescription?.hasMimeType("text/plain") == true) { v.setBackgroundColor(0xFF263238.toInt()); true } else false
+                DragEvent.ACTION_DRAG_ENTERED -> { v.setBackgroundColor(0xFF3B5568.toInt()); true }
+                DragEvent.ACTION_DRAG_EXITED -> { v.setBackgroundColor(0xFF263238.toInt()); true }
+                DragEvent.ACTION_DROP -> { e.clipData?.getItemAt(0)?.text?.toString()?.let { pin(File(it)) }; true }
+                DragEvent.ACTION_DRAG_ENDED -> { v.setBackgroundColor(dockBg); true }
+                else -> true
+            }
+        }
+        col.addView(tb, -1, dp(56)); col.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
+        col.addView(View(this).apply { setBackgroundColor(0xFF333333.toInt()) }, -1, dp(1))
+        col.addView(dock, -1, dp(58))
+        setContentView(col); migratePins(); updateDock(); home()
     }
 
     private fun hasPerm() = if (Build.VERSION.SDK_INT >= 30) Environment.isExternalStorageManager()
@@ -95,10 +117,59 @@ class MainActivity : Activity() {
         }.start()
     }
 
-    private fun chrome(t: String) {
+    private fun chrome(t: String, crumbs: Boolean = false) {
         titleV.text = t
+        titleV.visibility = if (crumbs) View.GONE else View.VISIBLE
+        crumbS.visibility = if (crumbs) View.VISIBLE else View.GONE
+        if (crumbs) buildCrumbs()
         backB.text = if (cur == null && list == null) "☰" else "←"
     }
+
+    private fun buildCrumbs() {
+        crumbL.removeAllViews()
+        fun chev() = ImageView(this).apply { setImageDrawable(Icons.chevron()); setColorFilter(0xFF888888.toInt()) }
+        val last = cur ?: return
+        crumbL.addView(ImageView(this).apply { setImageDrawable(Icons.homeColor()); setOnClickListener { home() } }, dp(34), dp(34))
+        crumbL.addView(chev(), dp(22), dp(22))
+        crumbL.addView(ImageView(this).apply { setImageDrawable(Icons.folder()); setOnClickListener { browse(root) } }, dp(34), dp(34))
+        val chain = ArrayList<File>(); var f: File? = last
+        while (f != null && f.path != root.path) { chain.add(0, f); f = f.parentFile }
+        chain.forEach { d ->
+            crumbL.addView(chev(), dp(22), dp(22))
+            crumbL.addView(tv(d.name, 17f, if (d == last) Color.WHITE else 0xFFBBBBBB.toInt()).apply {
+                maxLines = 1; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(6), 0, dp(6), 0); setOnClickListener { if (d != last) browse(d) }
+            }, LinearLayout.LayoutParams(-2, -1))
+        }
+        crumbS.post { crumbS.fullScroll(View.FOCUS_RIGHT) }
+    }
+
+    private fun updateDock() {
+        dock.removeAllViews()
+        fun item(ic: Drawable, label: String, click: () -> Unit, long: (() -> Unit)? = null) {
+            val v = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; setOnClickListener { click() } }
+            if (long != null) v.setOnLongClickListener { long(); true }
+            v.addView(ImageView(this).apply { setImageDrawable(ic) }, dp(30), dp(30))
+            v.addView(tv(label, 10f, 0xFFCCCCCC.toInt()).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER })
+            dock.addView(v, LinearLayout.LayoutParams(0, -1, 1f))
+        }
+        item(Icons.homeColor(), "Ana ekran", { home() })
+        val pins = (0 until 4).mapNotNull { n -> prefs.getString("slot$n", null)?.let { n to File(it) } }
+        pins.forEach { (n, f) ->
+            item(Icons.folder(), f.name, { if (f.exists()) browse(f) else Toast.makeText(this, "Klasör bulunamadı", Toast.LENGTH_SHORT).show() }, { slotMenu(n) })
+        }
+        if (pins.isEmpty()) dock.addView(tv("Bir klasörü basılı tutup buraya sürükleyin", 12f, 0xFF888888.toInt()).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(0, -1, 4f))
+        else if (pins.size < 4) dock.addView(View(this), LinearLayout.LayoutParams(0, -1, (4 - pins.size).toFloat()))
+    }
+
+    private fun slotMenu(n: Int) {
+        val f = File(prefs.getString("slot$n", null) ?: return)
+        AlertDialog.Builder(this).setTitle(f.name).setItems(arrayOf("Başka klasör seç", "Kaldır")) { _, w ->
+            if (w == 0) { slotPick = n; picking = true; browse(root) } else removeSlot(n)
+        }.setNegativeButton("İptal", null).show()
+    }
+
+    private fun removeSlot(n: Int) { prefs.edit().remove("slot$n").apply(); slotsChanged() }
+    private fun slotsChanged() { updateDock(); if (cur == null && list == null && !picking) home() }
 
     private fun home() {
         cur = null; list = null; sel.clear(); picking = false; body.removeAllViews()
@@ -140,12 +211,7 @@ class MainActivity : Activity() {
             if (p == null) tile("", "Ekle", "", { slotPick = n; picking = true; browse(root) }, null, null, true)
             else {
                 val f = File(p)
-                tile("", f.name, "", { if (f.exists()) browse(f) else Toast.makeText(this, "Klasör bulunamadı", Toast.LENGTH_SHORT).show() }, {
-                    AlertDialog.Builder(this).setTitle(f.name).setItems(arrayOf("Başka klasör seç", "Kaldır")) { _, w ->
-                        if (w == 0) { slotPick = n; picking = true; browse(root) }
-                        else { prefs.edit().remove("slot$n").apply(); home() }
-                    }.setNegativeButton("İptal", null).show()
-                }, Icons.folder())
+                tile("", f.name, "", { if (f.exists()) browse(f) else Toast.makeText(this, "Klasör bulunamadı", Toast.LENGTH_SHORT).show() }, { slotMenu(n) }, Icons.folder())
             }
         }
         body.addView(ScrollView(this).apply { addView(g) })
@@ -157,7 +223,7 @@ class MainActivity : Activity() {
         val e = prefs.edit(); old.forEachIndexed { i, p -> e.putString("slot$i", p) }; e.putBoolean("mig", true).apply()
     }
 
-    private fun setSlot(n: Int, f: File) { prefs.edit().putString("slot$n", f.path).apply() }
+    private fun setSlot(n: Int, f: File) { prefs.edit().putString("slot$n", f.path).apply(); slotsChanged() }
 
     private fun analysis() {
         val st = StatFs(root.path); val tot = st.totalBytes; val free = st.availableBytes
@@ -183,18 +249,30 @@ class MainActivity : Activity() {
         return when { e in IMG -> "🖼"; e in VID -> "🎬"; e in AUD -> "🎵"; e in DOC -> "📄"; e == "apk" -> "🤖"; e in setOf("zip", "rar", "7z", "tar", "gz") -> "🗜"; else -> "📃" }
     }
 
+    private fun iconView(f: File): View {
+        val e = f.extension.lowercase()
+        val d: Drawable? = when {
+            f.isDirectory -> Icons.folder()
+            e in setOf("md", "txt", "pdf", "doc", "docx", "odt", "rtf") -> Icons.docBlue()
+            e in IMG || e in VID || e in AUD || e == "apk" || e in setOf("zip", "rar", "7z", "tar", "gz") || e in DOC -> null
+            else -> Icons.file()
+        }
+        return if (d != null) ImageView(this).apply { setImageDrawable(d); setPadding(dp(1), dp(1), dp(1), dp(1)) }
+        else tv(icon(f), 24f, Color.WHITE).apply { gravity = Gravity.CENTER }
+    }
+
     private fun refresh() {
         val l = items()
-        chrome(if (picking) "Klasör seç" else if (sel.isNotEmpty()) "${sel.size} seçili" else if (list != null) listTitle else if (cur == root) "Ana bellek" else cur?.name ?: "")
-        val lv = ListView(this).apply { divider = null; setBackgroundColor(bg) }
+        chrome(if (sel.isNotEmpty()) "${sel.size} seçili" else if (list != null) listTitle else if (cur == root) "Ana bellek" else cur?.name ?: "", cur != null && list == null && sel.isEmpty())
+        val lv = ListView(this).apply { divider = ColorDrawable(0xFF2E2E2E.toInt()); dividerHeight = dp(1); setBackgroundColor(bg) }
         lv.adapter = object : BaseAdapter() {
             override fun getCount() = l.size
             override fun getItem(p: Int) = l[p]
             override fun getItemId(p: Int) = p.toLong()
             override fun getView(p: Int, v: View?, parent: android.view.ViewGroup?): View {
                 val f = l[p]
-                val row = LinearLayout(this@MainActivity).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(16), dp(10), dp(16), dp(10)); if (f in sel) setBackgroundColor(0xFF2C3E50.toInt()) }
-                row.addView(if (f.isDirectory) ImageView(this@MainActivity).apply { setImageDrawable(Icons.folder()); setPadding(dp(2), dp(2), dp(2), dp(2)) } else tv(icon(f), 26f, Color.WHITE).apply { gravity = Gravity.CENTER }, dp(44), dp(44))
+                val row = LinearLayout(this@MainActivity).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(12), dp(5), dp(12), dp(5)); if (f in sel) setBackgroundColor(0xFF2C3E50.toInt()) }
+                row.addView(iconView(f), dp(40), dp(40))
                 val c = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
                 c.addView(tv(f.name, 16f, Color.WHITE).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
                 val sub = if (f.isDirectory) "${f.listFiles()?.size ?: 0} öğe" else sz(f.length())
@@ -204,7 +282,14 @@ class MainActivity : Activity() {
             }
         }
         lv.setOnItemClickListener { _, _, p, _ -> val f = l[p]; if (sel.isNotEmpty()) toggle(f) else if (f.isDirectory) browse(f) else if (f.extension.lowercase() == "zip") zipDialog(f) else open(f) }
-        lv.setOnItemLongClickListener { _, _, p, _ -> toggle(l[p]); true }
+        lv.setOnItemLongClickListener { _, v, p, _ ->
+            val f = l[p]
+            if (f.isDirectory) {
+                try { v.startDragAndDrop(ClipData.newPlainText("klasor", f.absolutePath), View.DragShadowBuilder(v), null, 0) } catch (e: Exception) {}
+                if (f !in sel) { sel.add(f); refresh() }
+            } else toggle(f)
+            true
+        }
         val wrap = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         if (sel.isNotEmpty()) wrap.addView(selectionBar(), -1, dp(54))
         wrap.addView(lv, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -344,9 +429,13 @@ class MainActivity : Activity() {
     }
 
     private fun pin(f: File) {
-        val n = (0 until 4).firstOrNull { prefs.getString("slot$it", null) == null }
-        if (n == null) { Toast.makeText(this, "4 klasör yeri dolu, ana ekrandan birini kaldırın", Toast.LENGTH_SHORT).show(); return }
-        setSlot(n, f); Toast.makeText(this, "Ana ekrana eklendi", Toast.LENGTH_SHORT).show()
+        if (!f.isDirectory) return
+        val c = (0 until 4).map { prefs.getString("slot$it", null) }
+        if (f.path in c) { Toast.makeText(this, "Zaten alt çubukta", Toast.LENGTH_SHORT).show(); return }
+        val n = c.indexOfFirst { it == null }
+        if (n >= 0) { setSlot(n, f); Toast.makeText(this, "Alt çubuğa eklendi", Toast.LENGTH_SHORT).show() }
+        else AlertDialog.Builder(this).setTitle("Çubuk dolu, hangisi değişsin?")
+            .setItems(c.map { File(it!!).name }.toTypedArray()) { _, w -> setSlot(w, f) }.setNegativeButton("İptal", null).show()
     }
 
     private fun input(t: String, init: String, ok: (String) -> Unit) {
