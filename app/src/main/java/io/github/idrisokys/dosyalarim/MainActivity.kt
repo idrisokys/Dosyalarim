@@ -98,7 +98,7 @@ class MainActivity : Activity() {
             setOnClickListener {
                 val all = items()
                 if (all.isNotEmpty() && sel.containsAll(all)) sel.clear() else sel.addAll(all)
-                refresh(true)
+                selectionChanged()
             }
         }
         penV = ImageView(this).apply {
@@ -385,6 +385,22 @@ class MainActivity : Activity() {
         ImageView(this).apply { setImageDrawable(if (f.isDirectory) Icons.folder() else Icons.file()); setPadding(dp(1), dp(1), dp(1), dp(1)) }
 
     private var curLv: ListView? = null
+    private var curAdapter: BaseAdapter? = null
+    private var curBarHost: android.widget.FrameLayout? = null
+
+    private fun updateChrome() {
+        chrome(if (editMode) "${sel.size} seçili" else if (list != null) listTitle else if (cur == root) "Ana bellek" else cur?.name ?: "", cur != null && list == null && !editMode)
+    }
+
+    /** Seçim değişince listeyi yeniden kurmadan yerinde günceller (kaydırma bozulmaz, titreme olmaz). */
+    private fun selectionChanged() {
+        val ad = curAdapter; val host = curBarHost
+        if (ad == null || host == null || curLv?.isAttachedToWindow != true) { refresh(true); return }
+        updateChrome()
+        host.removeAllViews()
+        if (sel.isNotEmpty()) host.addView(selectionBar(), -1, dp(46))
+        ad.notifyDataSetChanged()
+    }
 
     /** keepScroll=true: aynı listede kalındığında (seçim, tümünü seç, sil...) kaydırma konumunu korur. */
     private fun refresh(keepScroll: Boolean = false) {
@@ -394,9 +410,9 @@ class MainActivity : Activity() {
             sPos = oldLv.firstVisiblePosition
             sTop = oldLv.getChildAt(0)?.top ?: 0
         }
-        curLv = null
+        curLv = null; curAdapter = null; curBarHost = null
         val l = items()
-        chrome(if (editMode) "${sel.size} seçili" else if (list != null) listTitle else if (cur == root) "Ana bellek" else cur?.name ?: "", cur != null && list == null && !editMode)
+        updateChrome()
         if (list != null && gal) { body.removeAllViews(); body.addView(galleryView(l)); return }
         val lv = ListView(this).apply { divider = ColorDrawable(0xFF2E2E2E.toInt()); dividerHeight = dp(1); setBackgroundColor(bg) }
         curLv = lv
@@ -408,14 +424,8 @@ class MainActivity : Activity() {
                 val f = l[p]
                 val row = LinearLayout(this@MainActivity).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(12), dp(5), dp(12), dp(5)); if (f in sel) setBackgroundColor(0xFF2C3E50.toInt()) }
                 if (editMode) {
-                    val on = f in sel
-                    val box = TextView(this@MainActivity).apply {
-                        text = if (on) "✓" else ""; textSize = 15f; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD; gravity = Gravity.CENTER
-                        background = GradientDrawable().apply { cornerRadius = dp(5).toFloat(); setColor(if (on) 0xFF4A90D9.toInt() else Color.TRANSPARENT); setStroke(dp(2), if (on) 0xFF4A90D9.toInt() else 0xFF888888.toInt()) }
-                    }
-                    // Seçme ve sürükleme SADECE kutucuktan yapılır (biraz geniş dokunma alanı)
+                    // Soldaki boş alan: seç/kaldır ve (seçiliyse) sürükle SADECE buradan yapılır. Seçili satır renkli görünür.
                     val hit = android.widget.FrameLayout(this@MainActivity).apply {
-                        addView(box, android.widget.FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER_VERTICAL or Gravity.START))
                         setOnClickListener { toggle(f) }
                         setOnLongClickListener {
                             // sadece seçili bir kutucuğa basılı tutunca seçilenleri alttaki sabit klasörlere sürükle
@@ -426,7 +436,7 @@ class MainActivity : Activity() {
                             true
                         }
                     }
-                    row.addView(hit, LinearLayout.LayoutParams(dp(46), dp(48)))
+                    row.addView(hit, LinearLayout.LayoutParams(dp(56), dp(56)))
                 }
                 row.addView(iconView(f), dp(48), dp(48))
                 val c = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
@@ -437,6 +447,7 @@ class MainActivity : Activity() {
                 return row
             }
         }
+        curAdapter = lv.adapter as? BaseAdapter
         lv.setOnItemClickListener { _, _, p, _ -> val f = l[p]; if (editMode) Unit else if (f.isDirectory) browse(f) else if (f.extension.lowercase() == "zip") zipDialog(f) else open(f) }
         lv.setOnItemLongClickListener { _, v, p, _ ->
             if (pendingShare != null) return@setOnItemLongClickListener true
@@ -450,13 +461,17 @@ class MainActivity : Activity() {
             true
         }
         val wrap = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        if (sel.isNotEmpty()) wrap.addView(selectionBar(), -1, dp(46))
+        val barHost = android.widget.FrameLayout(this)
+        if (sel.isNotEmpty()) barHost.addView(selectionBar(), -1, dp(46))
+        wrap.addView(barHost, LinearLayout.LayoutParams(-1, -2))
+        curBarHost = barHost
         wrap.addView(lv, LinearLayout.LayoutParams(-1, 0, 1f))
         if (pendingShare != null) wrap.addView(saveBar(), -1, -2)
         else if (picking) wrap.addView(Button(this).apply { text = "Bu klasörü seç"; setOnClickListener { if (slotPick in 0..3) setSlot(slotPick, cur!!); slotPick = -1; home() } }, -1, -2)
         else if (clip.isNotEmpty() && cur != null && list == null && !editMode) wrap.addView(pasteBar(), -1, dp(52))
+        if (keepScroll && (sPos > 0 || sTop != 0)) lv.setSelectionFromTop(minOf(sPos, maxOf(0, l.size - 1)), sTop)
+        curLv = lv
         body.removeAllViews(); body.addView(wrap)
-        if (keepScroll && (sPos > 0 || sTop != 0)) lv.post { lv.setSelectionFromTop(minOf(sPos, maxOf(0, l.size - 1)), sTop) }
     }
 
 
@@ -887,7 +902,7 @@ class MainActivity : Activity() {
             .setNegativeButton("İptal", null).show()
     }
 
-    private fun toggle(f: File) { if (!sel.remove(f)) sel.add(f); refresh(true) }
+    private fun toggle(f: File) { if (!sel.remove(f)) sel.add(f); selectionChanged() }
 
     private fun uri(f: File) = KFileProvider.uriFor(this, f)
 
