@@ -66,17 +66,17 @@ class MainActivity : Activity() {
         window.statusBarColor = Color.BLACK; window.navigationBarColor = bg
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(bg) }
         val tb = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(bar) }
-        titleV = tv("", 15f, Color.WHITE).apply { typeface = Typeface.DEFAULT_BOLD; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+        titleV = tv("", 21f, Color.WHITE).apply { typeface = Typeface.DEFAULT_BOLD; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
         crumbL = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         crumbS = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; visibility = View.GONE; addView(crumbL, -2, -1) }
-        cancelV = tv("İptal", 15f, Color.WHITE).apply { typeface = Typeface.DEFAULT_BOLD; maxLines = 1; gravity = Gravity.CENTER_VERTICAL; visibility = View.GONE; setPadding(dp(12), 0, 0, 0); setOnClickListener { sel.clear(); refresh() } }
+        cancelV = tv("İptal", 18f, Color.WHITE).apply { typeface = Typeface.DEFAULT_BOLD; maxLines = 1; gravity = Gravity.CENTER_VERTICAL; visibility = View.GONE; setPadding(dp(12), 0, 0, 0); setOnClickListener { sel.clear(); refresh() } }
         pinV = ImageView(this).apply {
-            setImageDrawable(Icons.pin()); setColorFilter(Color.WHITE); setPadding(dp(7), dp(7), dp(7), dp(7)); visibility = View.GONE
+            setImageDrawable(Icons.pin()); setColorFilter(Color.WHITE); setPadding(dp(8), dp(8), dp(8), dp(8)); visibility = View.GONE
             contentDescription = "Ana ekrana sabitle"; setOnClickListener { pinSelected() }
         }
         titleRow = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
-            addView(titleV, LinearLayout.LayoutParams(-2, -2)); addView(pinV, LinearLayout.LayoutParams(dp(34), dp(34)))
+            addView(titleV, LinearLayout.LayoutParams(-2, -2)); addView(pinV, LinearLayout.LayoutParams(dp(40), dp(40)))
         }
         val center = FrameLayout(this).apply {
             addView(titleRow, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER_VERTICAL))
@@ -85,9 +85,9 @@ class MainActivity : Activity() {
         tb.setPadding(dp(12), 0, dp(12), 0); tb.addView(center, LinearLayout.LayoutParams(0, -1, 1f)); tb.addView(cancelV, LinearLayout.LayoutParams(-2, -1))
         body = FrameLayout(this)
         dock = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(dockBg) }
-        col.addView(tb, -1, dp(40)); col.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
+        col.addView(tb, -1, dp(54)); col.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
         col.addView(View(this).apply { setBackgroundColor(0xFF333333.toInt()) }, -1, dp(1))
-        col.addView(dock, -1, dp(80))
+        col.addView(dock, -1, dp(100))
         setContentView(col); migratePins(); updateDock(); home()
     }
 
@@ -129,14 +129,14 @@ class MainActivity : Activity() {
         crumbL.removeAllViews()
         fun chev() = ImageView(this).apply { setImageDrawable(Icons.chevron()); setColorFilter(0xFF888888.toInt()) }
         val last = cur ?: return
-        crumbL.addView(ImageView(this).apply { setImageDrawable(Icons.homeColor()); setOnClickListener { home() } }, dp(26), dp(26))
-        crumbL.addView(chev(), dp(18), dp(18))
-        crumbL.addView(ImageView(this).apply { setImageDrawable(Icons.folder()); setOnClickListener { browse(root) } }, dp(26), dp(26))
+        crumbL.addView(ImageView(this).apply { setImageDrawable(Icons.homeColor()); setOnClickListener { home() } }, dp(34), dp(34))
+        crumbL.addView(chev(), dp(24), dp(24))
+        crumbL.addView(ImageView(this).apply { setImageDrawable(Icons.folder()); setOnClickListener { browse(root) } }, dp(34), dp(34))
         val chain = ArrayList<File>(); var f: File? = last
         while (f != null && f.path != root.path) { chain.add(0, f); f = f.parentFile }
         chain.forEach { d ->
-            crumbL.addView(chev(), dp(18), dp(18))
-            crumbL.addView(tv(d.name, 14f, if (d == last) Color.WHITE else 0xFFBBBBBB.toInt()).apply {
+            crumbL.addView(chev(), dp(24), dp(24))
+            crumbL.addView(tv(d.name, 19f, if (d == last) Color.WHITE else 0xFFBBBBBB.toInt()).apply {
                 maxLines = 1; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(6), 0, dp(6), 0); setOnClickListener { if (d != last) browse(d) }
             }, LinearLayout.LayoutParams(-2, -1))
         }
@@ -153,12 +153,12 @@ class MainActivity : Activity() {
                 v.addView(ImageView(this).apply {
                     setImageDrawable(Icons.add()); setColorFilter(0xFF888888.toInt()); setPadding(dp(5), dp(5), dp(5), dp(5))
                     background = GradientDrawable().apply { setColor(Color.TRANSPARENT); cornerRadius = dp(8).toFloat(); setStroke(dp(1), 0xFF555555.toInt(), dp(4).toFloat(), dp(3).toFloat()) }
-                }, dp(40), dp(40))
-                v.addView(tv("Ekle", 11f, 0xFF888888.toInt()).apply { gravity = Gravity.CENTER })
+                }, dp(54), dp(54))
+                v.addView(tv("Ekle", 14f, 0xFF888888.toInt()).apply { gravity = Gravity.CENTER })
                 v.setOnClickListener { slotPick = n; picking = true; browse(root) }
             } else {
-                v.addView(ImageView(this).apply { setImageDrawable(Icons.folder()) }, dp(40), dp(40))
-                v.addView(tv(f.name, 11f, 0xFFCCCCCC.toInt()).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER; setPadding(dp(2), 0, dp(2), 0) })
+                v.addView(ImageView(this).apply { setImageDrawable(Icons.folder()) }, dp(54), dp(54))
+                v.addView(tv(f.name, 14f, 0xFFCCCCCC.toInt()).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER; setPadding(dp(2), 0, dp(2), 0) })
                 v.setOnClickListener { if (f.isDirectory) { picking = false; list = null; browse(f) } else Toast.makeText(this, "Klasör bulunamadı", Toast.LENGTH_SHORT).show() }
                 v.setOnLongClickListener { slotMenu(n); true }
                 // dosyaları bu klasöre sürükleyip bırakınca taşı
@@ -229,7 +229,7 @@ class MainActivity : Activity() {
                 }
             }
             t.addView(i, dp(84), dp(84))
-            t.addView(tv(name, 14f, if (dashed) 0xFF888888.toInt() else 0xFFEEEEEE.toInt()).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER; setPadding(0, dp(6), 0, 0) })
+            t.addView(tv(name, 17f, if (dashed) 0xFF888888.toInt() else 0xFFEEEEEE.toInt()).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER; setPadding(0, dp(6), 0, 0) })
             t.setOnClickListener { click() }
             if (long != null) t.setOnLongClickListener { long(); true }
             g.addView(t, GridLayout.LayoutParams(GridLayout.spec(GridLayout.UNDEFINED), GridLayout.spec(GridLayout.UNDEFINED, 1f)).apply { width = 0 })
@@ -280,10 +280,10 @@ class MainActivity : Activity() {
                 val a = apps[p]
                 val row = LinearLayout(this@MainActivity).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(12), dp(6), dp(12), dp(6)) }
                 val ic = iconCache.getOrPut(a.pkg) { a.ai.loadIcon(packageManager) }
-                row.addView(ImageView(this@MainActivity).apply { setImageDrawable(ic) }, dp(44), dp(44))
+                row.addView(ImageView(this@MainActivity).apply { setImageDrawable(ic) }, dp(50), dp(50))
                 val c = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
-                c.addView(tv(a.label, 16f, Color.WHITE).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
-                c.addView(tv("${a.pkg} • ${sz(a.size)}", 12f, 0xFF999999.toInt()).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+                c.addView(tv(a.label, 19f, Color.WHITE).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+                c.addView(tv("${a.pkg} • ${sz(a.size)}", 14f, 0xFF999999.toInt()).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
                 row.addView(c, LinearLayout.LayoutParams(0, -2, 1f))
                 return row
             }
@@ -346,11 +346,11 @@ class MainActivity : Activity() {
             override fun getView(p: Int, v: View?, parent: android.view.ViewGroup?): View {
                 val f = l[p]
                 val row = LinearLayout(this@MainActivity).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(12), dp(5), dp(12), dp(5)); if (f in sel) setBackgroundColor(0xFF2C3E50.toInt()) }
-                row.addView(iconView(f), dp(40), dp(40))
+                row.addView(iconView(f), dp(48), dp(48))
                 val c = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, 0, 0) }
-                c.addView(tv(f.name, 16f, Color.WHITE).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+                c.addView(tv(f.name, 19f, Color.WHITE).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
                 val sub = if (f.isDirectory) "${f.listFiles()?.size ?: 0} öğe" else sz(f.length())
-                c.addView(tv("$sub • ${df.format(Date(f.lastModified()))}", 12f, 0xFF999999.toInt()))
+                c.addView(tv("$sub • ${df.format(Date(f.lastModified()))}", 14f, 0xFF999999.toInt()))
                 row.addView(c, LinearLayout.LayoutParams(0, -2, 1f))
                 return row
             }
